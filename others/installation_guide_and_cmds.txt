@@ -1,0 +1,2 @@
+Kali linux installation - https://techydruid.com/kali-linux-virtualbox/
+SNORT cmds and cheatsheet - https://docs.google.com/spreadsheets/d/1St7S0lok_l-23Ro1kHJzOvP0kUaIfik2Gy3rWgE707c/edit?usp=sharing

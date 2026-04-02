@@ -1,0 +1,14 @@
+Wireshark --> https://www.youtube.com/watch?v=qTaOZrDnMzQ&list=WL : crisp
+              https://www.youtube.com/watch?v=a_4MjV_-7Sw : Covered most of the concepts
+              https://www.youtube.com/watch?v=byL8VMEMC0M : Indian with PPT
+
+tcpdump --> https://www.youtube.com/watch?v=Ueiv3VxQd4k : Indian with PPT
+
+Types of Attacks --> https://www.youtube.com/watch?v=mjaY0ExSmFU : Indian short
+                     https://www.youtube.com/watch?v=yIm0Ol9Dg4Y : Indian good explaination
+
+
+SNORT tutorial --> https://www.youtube.com/watch?v=iBsGSsbDMyw : Attack capturing
+                   https://www.youtube.com/watch?v=UAKq1S-VxJ8 : Install and Configure
+
+Kali linux download --> https://youtu.be/ZJFu0AoAY_g?si=a6gxnH4mc_OrzdKz
