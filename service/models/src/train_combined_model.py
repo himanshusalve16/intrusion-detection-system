@@ -24,10 +24,12 @@ from lightgbm import LGBMClassifier
 
 print("Loading Datasets...")
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = Path(__file__).resolve().parents[3]
+MODEL_DIR = ROOT / "service" / "models" / "artifacts"
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-train_path = ROOT / "intrusion-detection-system" / "data" / "UNSW_NB15_training-set.csv"
-test_path = ROOT / "intrusion-detection-system" / "data" / "UNSW_NB15_testing-set.csv"
+train_path = ROOT / "data" / "UNSW_NB15_training-set.csv"
+test_path = ROOT / "data" / "UNSW_NB15_testing-set.csv"
 
 train_df = pd.read_csv(train_path)
 test_df = pd.read_csv(test_path)
@@ -231,11 +233,11 @@ print(
 
 print("\nSaving Models")
 
-joblib.dump(xgb, ROOT / "combined_xgb.pkl")
-joblib.dump(rf, ROOT / "combined_rf.pkl")
-joblib.dump(lgb, ROOT / "combined_lgb.pkl")
+joblib.dump(xgb, MODEL_DIR / "combined_xgb.pkl")
+joblib.dump(rf, MODEL_DIR / "combined_rf.pkl")
+joblib.dump(lgb, MODEL_DIR / "combined_lgb.pkl")
 
-joblib.dump(encoders, ROOT / "combined_encoders.pkl")
-joblib.dump(label_encoder, ROOT / "combined_label.pkl")
+joblib.dump(encoders, MODEL_DIR / "combined_encoders.pkl")
+joblib.dump(label_encoder, MODEL_DIR / "combined_label.pkl")
 
 print("Model Saved Successfully")

@@ -17,14 +17,15 @@ from sklearn.metrics import accuracy_score
 
 print("Loading IDS Model...")
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = Path(__file__).resolve().parents[3]
+MODEL_DIR = ROOT / "service" / "models" / "artifacts"
 
-model_xgb = joblib.load(ROOT / "final_xgb.pkl")
-model_rf = joblib.load(ROOT / "final_rf.pkl")
-model_lgbm = joblib.load(ROOT / "final_lgbm.pkl")
+model_xgb = joblib.load(MODEL_DIR / "final_xgb.pkl")
+model_rf = joblib.load(MODEL_DIR / "final_rf.pkl")
+model_lgbm = joblib.load(MODEL_DIR / "final_lgbm.pkl")
 
-encoders = joblib.load(ROOT / "final_encoders.pkl")
-label_encoder = joblib.load(ROOT / "final_labels.pkl")
+encoders = joblib.load(MODEL_DIR / "final_encoders.pkl")
+label_encoder = joblib.load(MODEL_DIR / "final_labels.pkl")
 
 print("Models Loaded Successfully")
 
@@ -80,7 +81,7 @@ if __name__ == "__main__":
 
     print("\nTesting Pipeline...")
 
-    TEST_PATH = ROOT / "intrusion-detection-system" / "data" / "UNSW_NB15_testing-set.csv"
+    TEST_PATH = ROOT / "data" / "UNSW_NB15_testing-set.csv"
 
     print(f"Loading test data from {TEST_PATH}...")
 

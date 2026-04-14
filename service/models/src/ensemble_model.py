@@ -14,8 +14,9 @@ import tensorflow as tf
 
 
 # Load dataset for evaluation
-ROOT = Path(__file__).resolve().parents[4]  # Go to project root where models are saved
-DATA_PATH = ROOT / "intrusion-detection-system" / "data" / "UNSW_NB15_testing-set.csv"
+ROOT = Path(__file__).resolve().parents[3]
+MODEL_DIR = ROOT / "service" / "models" / "artifacts"
+DATA_PATH = ROOT / "data" / "UNSW_NB15_testing-set.csv"
 
 print("Loading Test Dataset...")
 df = pd.read_csv(DATA_PATH)
@@ -40,20 +41,20 @@ print(f"Test Set Shape: {X_test.shape}")
 print("\nLoading Encoders and Models...")
 
 # Tree model components
-final_encoders = joblib.load(ROOT / "final_encoders.pkl")
-final_labels = joblib.load(ROOT / "final_labels.pkl")
-feature_selector = joblib.load(ROOT / "feature_selector.pkl")
+final_encoders = joblib.load(MODEL_DIR / "final_encoders.pkl")
+final_labels = joblib.load(MODEL_DIR / "final_labels.pkl")
+feature_selector = joblib.load(MODEL_DIR / "feature_selector.pkl")
 
 # DL model components
-dl_encoders = joblib.load(ROOT / "dl_encoders.pkl")
-dl_scaler = joblib.load(ROOT / "dl_scaler.pkl")
-dl_labels = joblib.load(ROOT / "dl_labels.pkl")
+dl_encoders = joblib.load(MODEL_DIR / "dl_encoders.pkl")
+dl_scaler = joblib.load(MODEL_DIR / "dl_scaler.pkl")
+dl_labels = joblib.load(MODEL_DIR / "dl_labels.pkl")
 
 # Load trained models
-xgb = joblib.load(ROOT / "final_xgb.pkl")
-rf = joblib.load(ROOT / "final_rf.pkl")
-lgbm = joblib.load(ROOT / "final_lgbm.pkl")
-dl_model = tf.keras.models.load_model(ROOT / "dl_model.h5")
+xgb = joblib.load(MODEL_DIR / "final_xgb.pkl")
+rf = joblib.load(MODEL_DIR / "final_rf.pkl")
+lgbm = joblib.load(MODEL_DIR / "final_lgbm.pkl")
+dl_model = tf.keras.models.load_model(MODEL_DIR / "dl_model.h5")
 
 # =====================================
 # Prepare Test Data (Tree Models)

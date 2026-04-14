@@ -36,6 +36,8 @@ RANDOM_STATE = 42
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATASET_PATH = PROJECT_ROOT / "data" / "UNSW_NB15_training-set.csv"
+MODEL_DIR = PROJECT_ROOT / "service" / "models" / "artifacts"
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 df = pd.read_csv(DATASET_PATH)
 
@@ -336,9 +338,9 @@ evaluate("Rare Random Forest", rf)
 
 print("\nSaving Stage-2 Rare Models...")
 
-joblib.dump(xgb, "stage2_rare_xgb.pkl")
-joblib.dump(rf, "stage2_rare_rf.pkl")
-joblib.dump(label_encoder, "stage2_rare_label.pkl")
-joblib.dump(encoder, "stage2_rare_encoder.pkl")
+joblib.dump(xgb, MODEL_DIR / "stage2_rare_xgb.pkl")
+joblib.dump(rf, MODEL_DIR / "stage2_rare_rf.pkl")
+joblib.dump(label_encoder, MODEL_DIR / "stage2_rare_label.pkl")
+joblib.dump(encoder, MODEL_DIR / "stage2_rare_encoder.pkl")
 
 print("Stage-2 Rare Models Saved")

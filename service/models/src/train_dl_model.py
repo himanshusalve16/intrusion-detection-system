@@ -20,6 +20,8 @@ from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 
 ROOT = Path(__file__).resolve().parents[3]
 DATA_PATH = ROOT / "data" / "UNSW_NB15_training-set.csv"
+MODEL_DIR = ROOT / "service" / "models" / "artifacts"
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 df = pd.read_csv(DATA_PATH)
 
@@ -168,10 +170,10 @@ print(
 
 # Save
 
-model.save("dl_model.h5")
+model.save(MODEL_DIR / "dl_model.h5")
 
-joblib.dump(scaler, "dl_scaler.pkl")
-joblib.dump(encoders, "dl_encoders.pkl")
-joblib.dump(label_encoder, "dl_labels.pkl")
+joblib.dump(scaler, MODEL_DIR / "dl_scaler.pkl")
+joblib.dump(encoders, MODEL_DIR / "dl_encoders.pkl")
+joblib.dump(label_encoder, MODEL_DIR / "dl_labels.pkl")
 
 print("DL Model Saved")

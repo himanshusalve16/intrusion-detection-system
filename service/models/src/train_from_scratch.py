@@ -28,6 +28,8 @@ from lightgbm import LGBMClassifier
 ROOT = Path(__file__).resolve().parents[3]
 
 DATA_PATH = ROOT / "data" / "UNSW_NB15_training-set.csv"
+MODEL_DIR = ROOT / "service" / "models" / "artifacts"
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 print("Loading Dataset...")
 
@@ -241,12 +243,12 @@ print(
 
 print("\nSaving Models")
 
-joblib.dump(xgb, "final_xgb.pkl")
-joblib.dump(rf, "final_rf.pkl")
-joblib.dump(lgbm, "final_lgbm.pkl")
+joblib.dump(xgb, MODEL_DIR / "final_xgb.pkl")
+joblib.dump(rf, MODEL_DIR / "final_rf.pkl")
+joblib.dump(lgbm, MODEL_DIR / "final_lgbm.pkl")
 
-joblib.dump(selector, "feature_selector.pkl")
-joblib.dump(encoders, "final_encoders.pkl")
-joblib.dump(label_encoder, "final_labels.pkl")
+joblib.dump(selector, MODEL_DIR / "feature_selector.pkl")
+joblib.dump(encoders, MODEL_DIR / "final_encoders.pkl")
+joblib.dump(label_encoder, MODEL_DIR / "final_labels.pkl")
 
 print("Model Saved Successfully")

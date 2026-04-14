@@ -29,6 +29,8 @@ import joblib
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATASET_PATH = PROJECT_ROOT / "data" / "UNSW_NB15_training-set.csv"
+MODEL_DIR = PROJECT_ROOT / "service" / "models" / "artifacts"
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 df = pd.read_csv(DATASET_PATH)
 print("Dataset Shape:", df.shape)
@@ -315,12 +317,12 @@ target_names=label_encoder.classes_
 
 print("\nSaving Models...")
 
-joblib.dump(xgb,"stage2_major_xgb.pkl")
-joblib.dump(rf,"stage2_major_rf.pkl")
-joblib.dump(lgbm,"stage2_major_lgbm.pkl")
+joblib.dump(xgb, MODEL_DIR / "stage2_major_xgb.pkl")
+joblib.dump(rf, MODEL_DIR / "stage2_major_rf.pkl")
+joblib.dump(lgbm, MODEL_DIR / "stage2_major_lgbm.pkl")
 
-joblib.dump(label_encoder,"stage2_major_label.pkl")
-joblib.dump(encoders,"stage2_major_encoders.pkl")
-joblib.dump(thresholds,"stage2_major_thresholds.pkl")
+joblib.dump(label_encoder, MODEL_DIR / "stage2_major_label.pkl")
+joblib.dump(encoders, MODEL_DIR / "stage2_major_encoders.pkl")
+joblib.dump(thresholds, MODEL_DIR / "stage2_major_thresholds.pkl")
 
 print("Stage-2 Major Saved")

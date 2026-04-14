@@ -4,3 +4,6 @@ globalPrompt.txt
 .venv/
 __pycache__/
 *.pyc
+service/models/artifacts/
+*.pkl
+*.h5
