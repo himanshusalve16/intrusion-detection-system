@@ -2,6 +2,7 @@ import { spawn } from "child_process";
 import { parse } from "csv-parse/sync";
 import dotenv from "dotenv";
 import express from "express";
+import cors from "cors";
 import fs from "fs/promises";
 import { MongoClient } from "mongodb";
 import path from "path";
@@ -240,6 +241,7 @@ async function ensureCsvLoaded(collection) {
 }
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 const state = {

@@ -99,7 +99,7 @@ docker compose exec api python -m src.api.db.seed
 
 | Service | URL |
 |---------|-----|
-| Dashboard | http://localhost:3000 |
+| Dashboard (Sentinel) | http://localhost:5173 |
 | API (Swagger) | http://localhost:8000/docs |
 | Grafana | http://localhost:3001 |
 | Prometheus | http://localhost:9090 |

@@ -2,25 +2,32 @@
 
 ## 1. What This Setup Does
 
-This test setup simulates live traffic by reading one record every 1 second from MongoDB, sending it to the primary model pipeline (from train_from_scratch.py artifacts), and showing alerts only when prediction is not Normal.
+This test setup simulates live traffic by reading one record every 1 second from MongoDB, sending it to the primary model pipeline (from train_from_scratch.py artifacts), and showing alerts in a live React dashboard when the prediction is not Normal.
 
 You now have:
 
-- Express test server in service/api
+- Express test server in `service/api`
 - MongoDB collection loader from CSV
 - Python prediction worker that loads trained artifacts
 - Rebalanced live test CSV (80% Normal, 20% Attack)
+- **Sentinel React Dashboard** in `service/dashboard` (Live UI)
 
 ---
 
 ## 2. Files Added/Updated
 
-### API side
+### API side (Backend)
 
 - service/api/package.json
 - service/api/package-lock.json
 - service/api/.env.example
 - service/api/src/server.js
+
+### Dashboard side (Frontend)
+
+- service/dashboard/src/App.jsx
+- service/dashboard/src/index.css
+- service/dashboard/src/components/ (Header, StatsWidget, etc.)
 
 ### Model bridge
 
@@ -156,6 +163,18 @@ $env:RELOAD_CSV='false'
 npm start
 ```
 
+## Step E: Start the Sentinel Dashboard (UI)
+
+Open a **new** terminal window (so your API keeps running) and run:
+
+```powershell
+Set-Location "service/dashboard"
+npm install
+npm run dev
+```
+
+Visit **http://localhost:5173** in your browser to view the live threat telemetry!
+
 ---
 
 ## 8. API Endpoints for Quick Check
@@ -222,6 +241,11 @@ MongoDB = live stream source
 
 - Stores CSV rows as test traffic stream
 - _sampleIndex controls sequential playback
+
+React Dashboard = User Interface
+
+- Connects to API endpoints
+- Displays glowing alerts and real-time stats visually
 
 ---
 
