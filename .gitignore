@@ -7,3 +7,5 @@ __pycache__/
 service/models/artifacts/
 *.pkl
 *.h5
+service/api/node_modules/
+service/api/.env
