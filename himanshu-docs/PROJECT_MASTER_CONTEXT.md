@@ -1,527 +1,453 @@
 # Project Master Context
 
 **Repository audited:** `https://github.com/himanshusalve16/intrusion-detection-system` (public at time of audit)
-**Audit date:** September 18, 2026
+**Audit date:** September 18, 2026 — **updated same day** after the team pushed a new commit adding a substantial deep-learning implementation.
 **Method:** Direct retrieval of repository file tree and file contents via GitHub. Every file cited below was read in full unless marked otherwise. No file content in this document was inferred or guessed.
-**Source-of-truth hierarchy applied throughout:** (1) source code, (2) config/schemas/tests, (3) project documentation, (4) comments/TODOs, (5) the uploaded IEEE literature-review paper (context only).
+**Source-of-truth hierarchy applied throughout:** (1) source code, (2) config/schemas/saved reports/tests, (3) project documentation, (4) comments/TODOs, (5) the uploaded IEEE literature-review paper (context only).
+
+> **Revision note:** This is a full update of the first-pass audit. The update was triggered by a new commit that adds a second-generation DL pipeline (PyTorch Lightning, Transformer/VAE architectures, versioned preprocessing artifacts, and — for the first time in this repo — genuinely saved, reproducible evaluation reports). Every section below reflects the repository as it now stands; nothing from the prior pass is carried over without re-verification. Where the update meaningfully changes a conclusion from the first pass, that is called out explicitly.
 
 ---
 
 ## 1. Project Identity
 
 - **Project name (as used in repo):** KodeMapper — "AI-Driven Intrusion Detection & Prevention System (IDPS)" *(README.md, others/Project_Synopsis.md)*
-- **Objective (as stated by the team):** an end-to-end AI-based Network Intrusion Detection and Prevention System that adds two things most academic ML-IDS work lacks — per-alert explainability (SHAP/LIME) and automated, human-gated remediation (a "SOAR-lite" policy engine).
+- **Objective (as stated by the team):** an end-to-end AI-based Network Intrusion Detection and Prevention System that adds two things most academic ML-IDS work lacks — per-alert explainability (SHAP/LIME) and automated, human-gated remediation (a "SOAR-lite" policy engine). The README now also markets a "Hybrid Multi-Engine Detection" capability (ML baseline + DL Transformer + AE anomaly canary) — see §16 for how much of that is actually wired up.
 - **Domain:** Network Intrusion Detection / Prevention (NIDS/NIPS), flow-based (not host-based, not deep packet inspection).
-- **Problem being solved (as framed by the team):** signature IDS (Snort/Suricata) miss zero-day attacks; academic ML-IDS papers stop at offline accuracy numbers and give operators no explanation and no way to act. The team is trying to close that gap.
-- **Team:** "KodeMapper", a 4-member final-year team (documentation/01_project_overview.md lists anonymized roles A–D: Data/ML, Infra/DevOps, Backend, Frontend/Docs). The GitHub account owner's name and institution (Himanshu Salve, Dept. of Electronics Engineering, Shri Ramdeobaba College of Engineering and Management, Nagpur) match a co-author of the IEEE literature-review paper supplied alongside this repository, and the repo's `/literature` folder contains the same 25 source papers cited in that paper. **This connection is a reasonable inference from matching names/institution/citation set, not an independently confirmed fact** — treat it as likely context, not verified identity.
-- **Target users / use case:** security operators in a lab/enterprise network segment; the current build is explicitly a demo/academic prototype, not a production deployment (README: "Safe demo mode… no risk of disrupting networks").
+- **Problem being solved (as framed by the team):** signature IDS (Snort/Suricata) miss zero-day attacks; academic ML-IDS papers stop at offline accuracy numbers and give operators no explanation and no way to act.
+- **Team:** "KodeMapper", a 4-member final-year team (documentation/01_project_overview.md lists anonymized roles A–D). The GitHub account owner's name and institution (Himanshu Salve, Dept. of Electronics Engineering, Shri Ramdeobaba College of Engineering and Management, Nagpur) match a co-author of the IEEE literature-review paper supplied alongside this repository, and the repo's `/literature` folder contains the same 25 source papers cited in that paper. **This connection is a reasonable inference from matching names/institution/citation set, not an independently confirmed fact.**
+- **Target users / use case:** security operators in a lab/enterprise network segment; explicitly a demo/academic prototype, not production.
+- **New in this commit:** `himanshu-docs/PROJECT_MASTER_CONTEXT.md` (55.9 KB) now exists in the repo. This is presumably the team's own copy of a prior version of this same audit document — it was not used as a source for this update (that would be circular); this update was built the same way as the first pass, straight from source code and stored artifacts.
 
 ---
 
 ## 2. Executive Project Overview
 
-This is a final-year engineering project with **two very different layers that must not be conflated**:
+The picture from the first audit — an ambitious planned microservice architecture next to a much thinner working prototype — still holds at the system-integration layer (backend, dashboard, SOAR, deployment, testing). **What has materially changed is the ML/DL layer**, which has gone from "several exploratory scripts with unlogged console output" to a genuinely professional, versioned, reproducible pipeline:
 
-1. **An extensive, well-written *planned* production architecture** — documented across 10 Markdown design docs, a synopsis document, and 4 "packet pipeline" tutorials — describing a microservice system: Zeek/tcpdump capture → Redis → FastAPI preprocessing/ML/SHAP → PostgreSQL → WebSocket dashboard → SOAR-lite automated `iptables` remediation, deployed via Docker Compose with Prometheus/Grafana.
+- A proper `dl_pipeline` package (PyTorch Lightning) implementing five distinct architectures: `FlowLSTM` (BiLSTM+attention), `AnomalyAutoencoder` (dense AE), `LSTMAutoencoder` / `MemoryLSTMAutoencoderLightning` (sequence AEs with a memory-addressing mechanism), `TemporalTransformerClassifier` (a small Transformer encoder used for both the binary attack-gate and the multiclass stage), and `TemporalOneClassVAE` (a Transformer-based one-class VAE for anomaly scoring).
+- A real, versioned (`_v1_20260612`) preprocessing pipeline: engineered features (byte/packet ratios, well-known-port flags), `OneHotEncoder` + `QuantileTransformer`, a chronological 70/15/15 split, and 10-step sliding-window sequence construction — with the fitted encoder/scaler/config/feature-list **actually committed** to `data/artifacts/`.
+- Two trained models with **committed weights** (`.pt` and `.onnx`) and — critically — **committed, code-generated evaluation JSON reports**: a Stage-1 binary "attack gate" (test accuracy 97.55%) and a Stage-2 five-class attack classifier (test macro recall 79.48%). These are the first genuinely independently-verifiable numeric results anywhere in this repository (see §18).
+- A written, honest experiment log (`experiments/lstm_training_journey.md`) documenting a real BiLSTM → BiLSTM+Attention+FocalLoss → Transformer progression, including a diagnosed and explained failure mode (a "double-weighting" class-imbalance bug), with numbers that match the committed JSON reports exactly.
 
-2. **A much smaller *actual, working* prototype** — a Node.js/Express server that replays 1,000 pre-sampled rows of the UNSW-NB15 dataset from MongoDB, one row per second, through a Python subprocess running a pre-trained tree-ensemble model (XGBoost + Random Forest + LightGBM, simple average), and displays non-"Normal" predictions on a React dashboard ("Sentinel"). There is **no live packet capture, no Redis, no PostgreSQL, no FastAPI, no SHAP/LIME in code, no automated remediation, no authentication, and no Docker/deployment configuration anywhere in the repository.**
+**But the integration step that would make this reach the live dashboard is missing.** `service/api/src/server.js` now defaults to spawning `service/models/src/unified_predictor_worker.py` as its prediction backend — and **that file does not exist anywhere in the repository.** The only predictor script that does exist and still works, `live_predictor_worker.py`, is byte-for-byte unchanged from the previous commit and still only serves the original XGBoost+RF+LightGBM tree ensemble — it has no knowledge of the new DL/AE models. As committed, running the system with its own `.env.example` template (`PREDICTOR_SCRIPT=` blank) would make the Node server try to spawn a nonexistent Python script and fail to start the prediction bridge. See §3, §9, §16, and §33 for the full detail.
 
-The team's own internal synthesis document (`himanshu-docs/master_synthesis_document.md`) is candid about this gap and explicitly recommends framing the FastAPI/Postgres/SOAR design as the "Proposed Production Architecture" and the Express/MongoDB prototype as the "Evaluation Sandbox Prototype" in any paper — this audit independently confirms that framing is accurate by reading the actual code, not just trusting that document's claim.
-
-The one part of the system that *is* substantively implemented, evidenced by real code, is the **ML model-training work**: half a dozen distinct exploratory training scripts on the UNSW-NB15 dataset, converging on a soft-voting XGBoost+RF+LightGBM ensemble with feature selection, whose artifacts are loaded by the live prediction bridge. However, none of the trained model files or evaluation logs are committed to the repository (they are `.gitignore`d), so the specific reported metrics cannot be reproduced or verified from the repo alone — only the code that would produce metrics of that shape is verifiable.
+So the honest summary of this update is: **the DL modeling work is real, substantial, and — for the first time — independently verifiable from stored artifacts. The "hybrid multi-engine" live system the README now advertises is not yet wired together.**
 
 ---
 
 ## 3. Actual Implemented System
 
-What genuinely runs, end to end, based on reading the code:
+Two things now need to be described separately, because they no longer match.
 
+**3a. What the server is built to do (per the new `server.js`):**
 ```
-tests/live_test_dataset.csv (1000 rows, 80% Normal / 20% Attack, sampled from
-  UNSW-NB15 training set by service/collector/mongoDB_csvCreate.py)
-        │  (loaded once, RELOAD_CSV=true)
+CSV/MongoDB row (UNSW-NB15 sample, unchanged sampling logic)
+        │  (1s poll, or CSV-fallback mode — new USE_CSV_FALLBACK flag)
         ▼
-MongoDB collection `live_test_dataset` (indexed by _sampleIndex)
-        │  (Express server polls every 1000ms, cursor wraps to 0 at the end)
+Express server spawns service/models/src/unified_predictor_worker.py
+        │  (stdin/stdout JSON bridge, now with a 120s startup timeout to
+        │   allow for DL model loading, and a 30s per-prediction timeout)
         ▼
-Node.js/Express server (service/api/src/server.js, port 3001)
-  - spawns a persistent Python child process running
-    service/models/src/live_predictor_worker.py
-  - sends one JSON sample over stdin, reads one JSON prediction over stdout
+Expected response fields: prediction, confidence, ml_prediction, ml_confidence,
+  dl_prediction, dl_confidence, dl_stage1_attack_prob, ae_anomaly_score,
+  zero_day_flag, engine_agreement, verdict_source ("ml"/"dl"/"both")
         │
         ▼
-Python predictor (loads final_xgb.pkl, final_rf.pkl, final_lgbm.pkl,
-  feature_selector.pkl, final_encoders.pkl, final_labels.pkl from
-  service/models/artifacts/ — NOT present in the repo, gitignored)
-  - drops id/mongo columns, applies saved LabelEncoders, applies the saved
-    SelectFromModel feature selector, averages the three models'
-    predict_proba() outputs, returns the argmax label + confidence
-        │
-        ▼
-Express: if prediction != "Normal", appended to an in-memory array
-  (capped at 200 entries, lost on server restart — no DB persistence of alerts)
-        │
-        ▼
-React dashboard "Sentinel" (service/dashboard, Vite, port 5173)
-  - polls GET /health and GET /alerts every 1s (optionally auto), or the
-    operator clicks "Ingest 1 Sample" to POST /poll-once manually
-  - renders a stat sidebar + a live alert feed list (no charts, no SHAP,
-    no maps, no approve/rollback controls)
+Express tracks per-engine attribution stats (mlOnlyDetections, dlOnlyDetections,
+  bothDetections, zeroDay count, attackBreakdown) and exposes them via two new
+  endpoints: GET /stats and GET /metrics (the latter now genuinely reads and
+  returns the real stored dl_stage1_binary_report_v1.0.json / dl_stage2_
+  multiclass_report_v1.0.json / dl_stage1_binary_threshold_v1.0.json files)
 ```
 
-This is a closed loop over a **static, pre-sampled 1,000-row snapshot** of UNSW-NB15 — not live traffic, not even a live re-sample of the dataset. When the cursor reaches row 1000 it wraps back to row 0 and repeats the same sequence indefinitely (`server.js`, `pollOnce()`).
+**3b. What can actually run today:** `service/models/src/unified_predictor_worker.py` — the script `server.js` needs — **does not exist** (confirmed by a direct file lookup that returned "Path not found in repository"). `.env.example`'s `PREDICTOR_SCRIPT` is blank, so nothing overrides the missing default. This means the live serving loop, as committed, cannot currently start end-to-end. If an operator manually points `PREDICTOR_SCRIPT` at the still-present `live_predictor_worker.py`, the server *will* run — but only in the original Part-1 mode (tree ensemble only; every `dl_*`/`ae_*`/`zero_day_flag`/`verdict_source` field the new dashboard-facing state expects will simply be `undefined`).
+
+The one-second CSV/MongoDB replay loop itself (§3 of the first pass) is otherwise unchanged: still a fixed 1,000-row UNSW-NB15 sample, still no live traffic.
 
 ---
 
 ## 4. Repository Structure
 
-Reconstructed from a full recursive listing (binary files noted but not opened):
+Reconstructed from a full recursive listing (binary files noted but not opened). **New since the first pass are marked `[NEW]`.**
 
 ```
 /
-├── README.md, run_guide.md, requirements.txt, .gitignore
+├── README.md, run_guide.md, requirements.txt, .gitignore  (.gitignore now excludes
+│                only final_rf.pkl by name, not the whole artifacts/ folder — see §17)
 ├── data/
-│   ├── UNSW_NB15_training-set.csv   (15.3 MB, committed)
-│   └── UNSW_NB15_testing-set.csv    (32.1 MB, committed)
-├── documentation/            10 planning docs (01–10) + 5 "packet pipeline"
-│                              tutorial docs + Flowchart.png + a MongoDB test guide
-├── docs_sahil/                method.md, ml.md — one team member's ML notes/experiment log
-├── himanshu-docs/             master_synthesis_document.md — a 63 KB internal audit/
-│                              synthesis doc (dated June 20, 2026) already comparing
-│                              planned vs. actual architecture
-├── others/                    Project_Synopsis.md, SNORT tutorial video, install notes,
-│                              a YouTube-link reading list, a synopsis screenshot
-├── literature/                25 source PDFs (5 IEEE + 20 non-IEEE) + 2 survey PDFs
-├── project evaluation/        2 large PDFs (March/April evaluation) — not opened, not
-│                              needed for the implementation audit
-├── notebooks/                 EMPTY (.gitkeep only) — no Jupyter notebooks despite being
-│                              referenced repeatedly in docs
-├── experiments/                EMPTY (.gitkeep only) — no logged results
-├── infra/                     EMPTY (.gitkeep only) — no Dockerfiles, no compose file
-├── tests/
-│   ├── .gitkeep
-│   └── live_test_dataset.csv  — a data fixture, NOT test code
+│   ├── UNSW_NB15_training-set.csv, UNSW_NB15_testing-set.csv  (unchanged, committed)
+│   └── artifacts/  [NEW] — 5 versioned preprocessing artifacts, all committed:
+│       feature_list_unsw_v1_20260612.json, onehot_encoder_unsw_v1_20260612.pkl,
+│       preprocessing_config_unsw_v1_20260612.json, scaler_unsw_v1_20260612.pkl,
+│       split_indices_unsw_v1_20260612.json
+├── documentation/  … same 10 core docs, plus [NEW]:
+│   ├── dl_datasets_plan.md (41 KB), dl_datasets_walkthrough (3 KB, no extension),
+│   └── dl_models_plan.md (28 KB)
+├── experiments/  [NEW CONTENT] — no longer just .gitkeep:
+│   └── lstm_training_journey.md — a genuine, dated experiment log (§18, §34)
+├── himanshu-docs/
+│   ├── master_synthesis_document.md  (unchanged)
+│   └── PROJECT_MASTER_CONTEXT.md  [NEW] (55.9 KB — presumably the team's copy of a
+│       prior audit pass; not used as a source for this update)
 ├── service/
-│   ├── api/            Express server (src/server.js, package.json, .env.example)
-│   ├── automation/     EMPTY (.gitkeep only) — SOAR-lite is 0% implemented
-│   ├── collector/      mongoDB_csvCreate.py only — no capture code (tcpdump/Zeek/Scapy)
-│   ├── dashboard/      Vite + React app ("Sentinel"), plus leftover default
-│   │                    Vite scaffold files never cleaned up (main.ts, counter.ts,
-│   │                    style.css, typescript/vite logo assets — dead code)
-│   ├── mobile/         EMPTY (.gitkeep only)
-│   ├── models/         src/ has 9 training/eval scripts + train_model.py at top level
-│   └── preproc/        EMPTY (.gitkeep only) — no standalone preprocessing module exists;
-│                        all preprocessing is inlined inside the training/predictor scripts
+│   ├── api/src/server.js  — grew from 10.8 KB to 17.3 KB; now expects a DL/AE-aware
+│   │       predictor and exposes /stats and /metrics (§3, §9)
+│   ├── models/
+│   │   ├── artifacts/  — previously entirely gitignored; now mostly COMMITTED:
+│   │   │   [NEW] dl_lstm_v1.0.{pt,onnx}, dl_stage1_binary_v1.0.{pt,onnx},
+│   │   │   dl_stage1_binary_{report,threshold}_v1.0.json,
+│   │   │   dl_stage2_multiclass_v1.0.{pt,onnx},
+│   │   │   dl_stage2_multiclass_{report,config}_v1.0.json,
+│   │   │   plus (already existed, still committed) feature_selector.pkl,
+│   │   │   final_encoders.pkl, final_labels.pkl, final_lgbm.pkl, final_xgb.pkl.
+│   │   │   final_rf.pkl is the one file still excluded (>100 MB GitHub limit).
+│   │   └── src/  … same 9 Part-1 scripts, plus [NEW]:
+│   │       dl_data_harmonize.py, dl_data_pipeline_unsw.py, dl_eda_cicids.py,
+│   │       dl_eda_nslkdd.py, dl_eda_unsw.py, dl_generate_checksums.py,
+│   │       eval_dl_lstm.py, eval_dl_stage1_binary.py, eval_dl_stage2_multiclass.py,
+│   │       train_dl_lstm.py, train_dl_stage1_binary.py, train_dl_stage2_multiclass.py,
+│   │       dl_pipeline/  [NEW package] __init__.py, dataset.py, evaluator.py,
+│   │           lightning_modules.py (26.9 KB — the real model architectures), models.py, utils.py
+│   │       **`unified_predictor_worker.py` is referenced by server.js and by
+│   │       `experiments/lstm_training_journey.md` but does NOT exist in this
+│   │       directory or anywhere else in the repository.**
+│   └── preproc/  [NEW CONTENT] — no longer empty:
+│       __init__.py, dl_preprocessor.py (a real, working live-inference preprocessor
+│       class — see §14)
+├── tests/  — unchanged, still just a CSV fixture, no test code
+├── infra/, notebooks/, service/automation/, service/mobile/  — still empty (.gitkeep only)
 ```
 
-`.gitignore` explicitly excludes `service/models/artifacts/`, `*.pkl`, `*.h5`, `service/api/node_modules/`, `service/api/.env`, `.venv/`, and a file called `globalPrompt.txt` (never seen — likely the team's internal AI-assistant prompt, not a project artifact).
+Everything else (documentation set, literature, project evaluation PDFs, others/) is unchanged from the first pass.
 
 ---
 
 ## 5. Complete Technology Stack
 
-| Layer | **Documented / Planned** (Docs 01–07, Project_Synopsis.md) | **Actually in the code** | Status |
+| Layer | **Documented / Planned** | **Actually in the code** | Status |
 |---|---|---|---|
-| Backend language/API | Python, FastAPI, Uvicorn, Pydantic, JWT auth | **Node.js, Express 4** (`service/api/package.json`: cors, csv-parse, dotenv, express, mongodb — no auth library at all) | **MISMATCH** |
-| Database | PostgreSQL (relational alerts/audit) | **MongoDB** (one collection, `live_test_dataset`) | **MISMATCH** |
-| Message queue/cache | Redis pub/sub | **None** — Express in-process polling + an in-memory array | **NOT IMPLEMENTED** |
-| Traffic capture | tcpdump, tshark, Zeek, CICFlowMeter | **None found anywhere** — only a CSV-sampling script | **NOT IMPLEMENTED** |
-| ML/DL core | scikit-learn, XGBoost, PyTorch, class RF/XGB/LSTM/Autoencoder | **scikit-learn, XGBoost, LightGBM, TensorFlow/Keras** actually used (requirements.txt omits imbalanced-learn's SMOTE variants used in code, omits lightgbm/tensorflow — requirements.txt is stale/incomplete, see §33) | **PARTIAL / MISMATCH** |
-| Explainability | SHAP, LIME | **No `shap` or `lime` import found in any fetched file** | **NOT IMPLEMENTED** |
-| Frontend | React 18, Chart.js, D3.js, TypeScript | **React 19** (plain, via Vite) — no Chart.js, no D3, no axios, no TypeScript used for the actual app logic (a `.jsx` app; leftover `.ts` scaffold files are unused Vite boilerplate) | **PARTIAL / MISMATCH** |
-| Alerting | SMTP, Slack webhook, Firebase push | **None** — alerts only shown in the dashboard / printed to server console | **NOT IMPLEMENTED** |
-| Prevention | iptables, Suricata rule API | **`service/automation/` contains only `.gitkeep`** | **NOT IMPLEMENTED (0%)** |
-| Containerization | Docker, Docker Compose, K8s | **`infra/` contains only `.gitkeep`** — no Dockerfile anywhere | **NOT IMPLEMENTED** |
-| Monitoring | Prometheus, Grafana | **None found** | **NOT IMPLEMENTED** |
-| CI/CD | GitHub Actions | **No `.github/workflows` found in the listed tree** | **NOT VERIFIED / likely absent** |
-| Testing | pytest, Jest, Playwright, ≥80% coverage target | **`tests/` contains only a CSV data fixture — zero test code found** | **NOT IMPLEMENTED** |
-| Model tracking | MLflow | **Not found** | **NOT IMPLEMENTED** |
+| Backend API | FastAPI, JWT auth | Express 4 (Node.js), no auth | **MISMATCH** (unchanged) |
+| Database | PostgreSQL | MongoDB (or, new: CSV-fallback bypassing DB entirely) | **MISMATCH** (unchanged) |
+| ML baseline | XGBoost, RF, LightGBM | **Implemented and genuinely used** | **IMPLEMENTED** |
+| DL engine | README: "Temporal Transformers for sequence modeling" | **Implemented**: `TemporalTransformerClassifier` (PyTorch Lightning), trained and evaluated for both a binary attack-gate and a 5-class attack classifier, with committed weights + committed evaluation reports | **IMPLEMENTED (training/eval side); not wired to the live server — see below** |
+| Anomaly/zero-day engine | README: "AE Anomaly Canary (TemporalOneClassVAE)" | `TemporalOneClassVAE` class is fully implemented (encode/decode/anomaly-score/calibration methods) in `dl_pipeline/lightning_modules.py`, but **no trained weights, no threshold file, and no evaluation report for it exist anywhere in the repo** — `server.js` even has a `try/catch`-guarded load for a `dl_ae_threshold_v1.0.json` file that doesn't exist | **PARTIALLY IMPLEMENTED — architecture + training/scoring logic complete; never trained to completion (or never committed) and not evaluated** |
+| DL preprocessing | — | **Implemented**: `QuantileTransformer` + `OneHotEncoder`, engineered ratio/port features, chronological split, sliding-window sequencing — code + fitted artifacts both committed | **IMPLEMENTED** |
+| Live DL serving | README: unified hybrid engine | `unified_predictor_worker.py` — **file does not exist** | **NOT IMPLEMENTED (integration gap)** |
+| Explainability | SHAP, LIME | Still no `shap`/`lime` import found anywhere, including in the new DL code | **NOT IMPLEMENTED** (unchanged) |
+| SOAR-lite | iptables/Suricata automation | `service/automation/.gitkeep` only | **NOT IMPLEMENTED (0%)** (unchanged) |
+| Multi-dataset (NSL-KDD, CICIDS2017) | Explicit, repeated | Real harmonization/EDA **code** now exists for both, but **no data files for either are committed**, and the new scripts expect a `data/raw/…` layout that doesn't match the repo's actual `data/…` layout (see §12) | **PARTIALLY IMPLEMENTED (code only, not runnable as committed)** — upgraded from "documented only" |
+| Deployment, monitoring, tests | Docker/Compose, Prometheus/Grafana, pytest/Jest | Still nothing found | **NOT IMPLEMENTED** (unchanged) |
 
 ---
 
 ## 6. System Architecture
 
-**Planned (documented, `documentation/02_tech_and_architecture.md`, `others/Project_Synopsis.md`):** a 7-component microservice pipeline (Collector → Redis → Preprocessor → ML Engine w/ SHAP → FastAPI → {Dashboard, Alerting, SOAR-lite} → {PostgreSQL/Redis, Prometheus/Grafana, Nginx TLS}). This is a coherent, plausible design — but it is a design, not a build.
+**Planned (unchanged):** the 7-component microservice pipeline from `documentation/02_tech_and_architecture.md`.
 
-**Actual (as implemented):** a single-process Node.js server + a single spawned Python child process + a static MongoDB collection + a polling React SPA. See §3 for the exact loop. There is no message broker, no persistent alert store, no service boundary enforcement, no auth boundary, and no containerization tying any of it together.
+**Actual, as the new commit intends it:** the same Express + MongoDB/CSV replay loop as before, now fronting a "unified" Python predictor process meant to combine the tree ensemble, the Transformer classifiers, and the VAE anomaly scorer into one JSON response per sample, with attribution (`verdict_source`) and a zero-day flag surfaced to the dashboard's state layer. **This architecture is well-designed on paper and partially built in code (the preprocessor and the individual models all exist and work), but the one file that would actually assemble them into a running service (`unified_predictor_worker.py`) is missing.** The system as it can actually be started today still only exercises the Part-1 tree ensemble, exactly as in the first audit pass.
 
 ---
 
 ## 7. End-to-End Data Flow
 
-**Planned:** `Network Traffic → Mirror Port/TAP → Zeek/tcpdump → Redis → Feature Extraction/Encoding/Scaling → Ensemble+SHAP → FastAPI (Postgres write + WS broadcast) → Dashboard / Email-Slack / SOAR-lite iptables`.
+**Planned (unchanged):** `Network Traffic → Mirror Port/TAP → Zeek/tcpdump → Redis → Feature Extraction → Ensemble+SHAP → FastAPI → Dashboard/Email-Slack/SOAR-lite`.
 
-**Actual:** `UNSW-NB15 training CSV → mongoDB_csvCreate.py samples 1000 rows (fixed 80/20 class ratio, fixed weak-attack exclusion, seed=42) → tests/live_test_dataset.csv → MongoDB (one-time load, gated by RELOAD_CSV env flag) → Express polls one row/second by cursor → stdin/stdout JSON round-trip to a persistent Python worker → 3-model averaged soft-voting prediction → non-Normal predictions pushed into an in-memory array (cap 200) → React dashboard polls REST endpoints`.
+**Actual, offline/training side (new and real):** `UNSW-NB15 train+test CSVs → dl_data_pipeline_unsw.py (feature engineering, one-hot + quantile scaling, chronological 70/15/15 split, sliding-window sequencing) → data/artifacts/*.pkl,*.json (committed) + data/sequences/*.npy (NOT committed) → train_dl_stage1_binary.py / train_dl_stage2_multiclass.py (TemporalTransformerClassifier, PyTorch Lightning) → service/models/artifacts/dl_stage{1,2}_*.{pt,onnx,json} (committed)`.
 
-The gap between these two flows is total for every stage except "run a trained tabular ensemble model on one row of UNSW-NB15 at a time."
+**Actual, live-serving side (unchanged from first pass, because the new integration script is missing):** `CSV/MongoDB row → live_predictor_worker.py (XGBoost+RF+LightGBM average only) → in-memory alert array → dashboard polling`. The new DL/AE artifacts sit in the repository, fully trained and evaluated, but are not consumed by any script that the running server actually calls.
 
 ---
 
 ## 8. Frontend Implementation
 
-- **Framework:** React 19 + Vite (`service/dashboard`), plain JSX, no TypeScript in the actual app, no component library, no charting library.
-- **Files that matter:** `src/App.jsx` (state + polling), `src/components/{Header,StatsWidget,ControlPanel,TelemetryFeed}.jsx`, `src/index.css` (a dark "glassmorphism"/neon theme — this is where the visual identity actually lives).
-- **What it shows:** connection status badge, 4 stat tiles (processed samples, critical-alert count at ≥90% confidence, average confidence, DB cursor position), a manual "Ingest 1 Sample" button, an auto-sync toggle, and a scrolling list of alerts (time, predicted attack type, confidence bar, sample index). No SHAP visuals, no model-comparison page, no settings page, no login screen, no SOAR approve/rollback UI — none of these exist despite being specified in `documentation/03_implementation_plan.md` and `07_api_and_user_manual.md`.
-- **Dead code found:** `src/main.ts`, `src/counter.ts`, `src/style.css`, and the `typescript.svg`/`vite.svg`/`hero.png` assets are the **unmodified default Vite scaffold** (a counter button demo page) — never wired into the real app and never removed. Minor housekeeping issue, not a functional bug.
-- **API base URL is hardcoded** (`http://127.0.0.1:3001`) in `App.jsx` — no environment-based configuration on the frontend.
+**Unchanged from the first pass** — no dashboard files were modified in this commit. `App.jsx` and the 4 components still poll only `/health` and `/alerts`; they do not yet consume the new `/stats` or `/metrics` endpoints, and there is still no UI for per-engine attribution, zero-day flags, or anomaly scores, even though the backend state layer now tracks all of that. The unused Vite scaffold files (`main.ts`, `counter.ts`, `style.css`) are still present.
 
 ---
 
 ## 9. Backend Implementation
 
-- **Framework:** Express 4 on Node.js (`service/api/src/server.js`, ~330 lines).
-- **Endpoints (all of them):** `GET /health`, `GET /alerts`, `POST /poll-once`, `GET /config`. That is the complete API surface. None require authentication; CORS is wide open (`app.use(cors())` with default/all-origins config).
-- **Config:** environment-driven via `dotenv` (`PORT`, `MONGODB_URI`, `MONGODB_DB_NAME`, `MONGODB_COLLECTION`, `CSV_PATH`, `POLL_INTERVAL_MS`, `PYTHON_CMD`, `PREDICTOR_SCRIPT`, `RELOAD_CSV`). `.env` itself is gitignored (good practice); `.env.example` is committed and uses a placeholder MongoDB Atlas connection string.
-- **Python bridge:** a custom `PythonPredictorBridge` class manages a long-lived child process, correlates requests/responses by an incrementing `requestId` over newline-delimited JSON on stdin/stdout, with a 20s startup timeout and a 10s per-prediction timeout.
-- **State:** a single in-process `state` object (`processedSamples`, `currentCursor`, `totalSamples`, `alerts[]`). No database write-back of alerts — a server restart loses all alert history.
+- **Framework:** Express 4, same as before, but `service/api/src/server.js` grew from ~330 to ~500 lines.
+- **New endpoints:** `GET /stats` (per-engine detection counts, zero-day count, attack-type breakdown, engine-agreement rate) and `GET /metrics` (returns the real stored DL evaluation JSON files verbatim — a genuinely useful, honest feature, since it surfaces actual committed results rather than fabricating anything). Still no auth on any endpoint; CORS still wide open.
+- **New config:** `USE_CSV_FALLBACK` (default `true` in the committed `.env.example`) lets the server run entirely off the CSV file, bypassing MongoDB. `PREDICTOR_SCRIPT` now defaults to `service/models/src/unified_predictor_worker.py` — **the missing file** (§3, §33).
+- **`.env.example` now contains what reads as a real MongoDB Atlas connection string with an embedded username and password** (`mongodb+srv://admin:adminkapassword@cluster0.kgfpket.mongodb.net/`) in place of the earlier `<username>:<password>` placeholder. This is flagged as a security-hygiene item in §27 — it was not tested or connected to as part of this audit.
+- The `PythonPredictorBridge` class is otherwise structurally unchanged, just with longer timeouts (120s startup, 30s per prediction) to accommodate DL model loading.
 
 ---
 
 ## 10. Database / Storage Implementation
 
-- **Actual:** MongoDB only, one collection (`live_test_dataset`), seeded from a CSV, indexed uniquely on `_sampleIndex`. No `alerts`, `actions`, `users`, or `audit_log` collections/tables exist anywhere in the code — the detailed PostgreSQL schema in `documentation/03_implementation_plan.md` (four tables with UUID PKs, JSONB SHAP columns, etc.) is **entirely unimplemented**, design-only.
-- **Planned:** PostgreSQL (relational, with the schema above) + Redis (pub/sub + cache). Neither appears in any dependency file or source file.
+Unchanged: MongoDB only, one collection, no persistence of alerts across restarts. The new `USE_CSV_FALLBACK` mode means MongoDB isn't even required to run the server now — a meaningful simplification, but it doesn't add any persistence (the CSV-fallback path holds rows in a plain in-memory array too).
 
 ---
 
 ## 11. Data Collection
 
-- **Planned:** live capture via mirror port/TAP using tcpdump/tshark/Zeek, converting packets to flow records.
-- **Actual:** **zero packet-capture code**. "Collection" in the working system means `service/collector/mongoDB_csvCreate.py`, which deterministically samples rows from an already-existing, already-labeled CSV dataset (UNSW-NB15) — it does not touch a network interface. This is confirmed by a full read of every file under `service/collector/`.
-- The extensive `documentation/packet_pipeline_part2_capture.md` (Zeek/tcpdump setup, BPF filters, log parsers) and `documentation/packet_pipeline_solutions.md` (a 62 KB "how to actually wire up 4 VMs/laptops with ZeroTier and Zeek" guide) are detailed, practically-oriented **plans for future work**, not descriptions of anything currently running. `packet_pipeline_part1_overview.md` itself contains an explicit team-authored table stating capture, Redis, and SOAR-lite are all "❌ Not built yet."
+Unchanged: no packet-capture code anywhere. Still a CSV-sampling script (`mongoDB_csvCreate.py`, essentially unchanged, 2912→2920 bytes) as the only "collection" mechanism.
 
 ---
 
 ## 12. Dataset Details
 
-- **Dataset actually present and used:** UNSW-NB15 only — both `UNSW_NB15_training-set.csv` and `UNSW_NB15_testing-set.csv` are committed to the repo and are read directly by every training script and by the live sample-generation script.
-- **NSL-KDD and CICIDS2017:** referenced extensively across the documentation and synopsis (as planned evaluation datasets, with citations) but **no NSL-KDD or CICIDS2017 file, download script, or loader code was found anywhere in the repository.** Status: **PLANNED / DOCUMENTED ONLY.**
-- **Class distribution and feature counts** (82,332 training samples, 49 raw features, 10 attack categories, per-class counts down to "Worms = 44") are reported in `docs_sahil/ml.md`. This is **documentation-tier evidence (team member's notes), not something this audit independently recomputed from the CSV** — the numbers are plausible and consistent with the training scripts' behavior (which do filter exactly the classes named as "weak": Analysis, Backdoor, Shellcode, Worms) but are not re-derived here from the raw data.
+- **UNSW-NB15:** unchanged — both CSVs committed, now with a real, versioned, committed preprocessing pipeline output (`data/artifacts/*`, dated `20260612`) sitting alongside them.
+- **NSL-KDD, CICIDS2017 — upgraded status from "documented only" to "code exists but not runnable as committed":**
+  - `dl_eda_nslkdd.py` expects `data/raw/nslkdd/KDDTrain+.txt` and `KDDTest+.txt` — **neither file is present anywhere in the repository.**
+  - `dl_data_harmonize.py` expects CICIDS2017 CSVs under `data/raw/cicids2017/*.csv` — **not present.** (`dl_eda_cicids.py` presumably has the same expectation; not opened in this pass.)
+  - Both scripts, and `dl_data_pipeline_unsw.py` (which *does* have its source data committed), all read from a `data/raw/…` subdirectory — **but the repository's actual committed data sits directly under `data/…`, with no `raw/` subfolder.** So even the UNSW-only pipeline script, as committed, would fail on a fresh checkout with a file-not-found error unless someone manually creates `data/raw/` and copies the CSVs there. This is a concrete, verifiable path-convention mismatch between the new DL scripts and the actual repo layout.
+  - **Net effect:** three datasets are now referenced by real processing code, but only one (UNSW-NB15) has committed data, and even that one requires a directory the repo doesn't have. Practically, only UNSW-NB15 is usable today.
+- Class-distribution figures reported in `docs_sahil/ml.md` remain **not independently recomputed** from the raw CSV in this audit.
 
 ---
 
 ## 13. Data Preprocessing
 
-Confirmed by reading every training/inference script:
-- Dropped identifier/leakage columns: `srcip`, `dstip`, `id`, `Stime`, `Ltime` (consistently, across all scripts).
-- Categorical encoding: `sklearn.preprocessing.LabelEncoder` per categorical column (proto/service/state), fit on train, applied to test with an unknown-category fallback (`-1` or `0`, inconsistently across scripts — see §33).
-- Class-imbalance handling: multiple different techniques tried in different scripts — plain class weighting, `SMOTE`, `SMOTENC` (categorical-aware SMOTE), `SMOTETomek` (SMOTE + Tomek-link cleaning) — not a single consistent pipeline.
-- Feature selection: only in `train_from_scratch.py`, via `sklearn.feature_selection.SelectFromModel` (threshold = median) fit on an initial XGBoost model.
-- Scaling: `StandardScaler`, used only in the deep-learning script (`train_dl_model.py`); the tree-model scripts do not scale features (expected — tree ensembles don't need it).
-- **No standalone preprocessing module exists** (`service/preproc/` is empty) — every script inlines its own preprocessing, and the several scripts are **not consistent with one another** (see §33 for the resulting bug in `predict_pipeline.py`).
+**Two parallel, materially different preprocessing pipelines now coexist in this repo** — worth stating plainly since it's easy to conflate them:
+
+1. **Part-1 (tree ensemble) pipeline** — unchanged from the first pass: per-script `LabelEncoder`, `SelectFromModel` feature selection (only in `train_from_scratch.py`), various SMOTE/SMOTENC/SMOTETomek balancing attempts, no persisted artifact versioning beyond the plain `.pkl` filenames.
+2. **Part-2 (DL) pipeline, new this commit** — a single, versioned, artifact-committed pipeline (`dl_data_pipeline_unsw.py`): drops `srcip/dstip/id/sport/dsport/Ltime`, engineers `is_wellknown_sport`, `is_wellknown_dsport`, `bytes_ratio`, `pkts_ratio`, `pkt_size_avg`; one-hot encodes `proto/service/state`; scales numeric features with a `QuantileTransformer(output_distribution="normal")`; sorts by `Stime` for a **chronological** (not random) 70/15/15 train/val/test split; and builds 10-step sliding-window sequences (stride 1, label = last flow in the window) for the sequence models. A matching `DLPreprocessor` class (`service/preproc/dl_preprocessor.py`) replays exactly this logic at inference time from the committed artifacts — genuinely good practice, and it would work correctly if something called it.
+
+These two pipelines produce **different feature representations** (different drop-lists, different encoders, different scalers) and are **not interchangeable** — the tree-ensemble artifacts and the DL artifacts each need their own matching preprocessor. `live_predictor_worker.py` (still running) only knows about pipeline #1; nothing currently running knows about pipeline #2 end-to-end except the training/eval scripts themselves.
 
 ---
 
 ## 14. Feature Engineering
 
-- The project uses UNSW-NB15's **pre-computed 49 flow features as-is**; there is no custom flow-feature extraction from raw packets (no `feature_extractor.py`, no window-based connection tracker) anywhere in the code — the elaborate `ConnectionTracker` class and Zeek-to-UNSW-NB15 feature-mapping table in `documentation/packet_pipeline_part3_processing_ml.md` are **pseudocode within a planning document**, not implemented modules.
-- Feature importance discussion (`ct_state_ttl`, `sttl`, `dttl`, `sbytes`, `dbytes`, `ct_dst_src_ltm`, `ct_srv_dst`, `ct_src_dport_ltm` as top features) appears only in `docs_sahil/ml.md` — plausible and consistent with UNSW-NB15 literature, but **not independently reproduced from a stored feature-importance run** in this repository.
+Now genuinely present for the DL pipeline (see §13): derived ratio/port features plus the raw UNSW-NB15 feature set, one-hot expanded and quantile-scaled to a 198-dimensional input vector (confirmed by `input_size: 198` in the committed `dl_stage1_binary_threshold_v1.0.json`). This is a real step up from the first pass, where no custom feature engineering existed at all. The elaborate window-based `ConnectionTracker` concept from `documentation/packet_pipeline_part3_processing_ml.md` is still pseudocode-only — the *sequencing* that exists now (10-flow sliding windows over already-i.i.d. dataset rows) is not the same thing as the *live, per-connection temporal windowing* described in that planning document; it operates on dataset row order, not on real per-flow arrival time.
 
 ---
 
-## 15. Machine Learning Implementation
+## 15. Machine Learning Implementation (Part 1 — tree ensemble)
 
-Nine distinct model files exist under `service/models/` (`src/` + one top-level script), each a **separate exploratory experiment**, not variations of one canonical pipeline:
+Unchanged from the first pass — see the original 9-script inventory (train_binary_model.py, train_stage1_binary.py, train2_model.py, train_stage2_major.py, train_combined_model.py, train_model.py, train_from_scratch.py, train_dl_model.py, ensemble_model.py). `train_from_scratch.py`'s artifacts (`final_xgb.pkl`, `final_rf.pkl` [excluded from git by size], `final_lgbm.pkl`, `feature_selector.pkl`, `final_encoders.pkl`, `final_labels.pkl`) are still what `live_predictor_worker.py` actually serves. The self-reported 89.75%/81.58% figures from `docs_sahil/ml.md` are **still not backed by any stored log or report file** — that conclusion from the first pass is unchanged.
 
-| Script | What it trains | Classes covered | Balancing | Saves |
+---
+
+## 16. Deep Learning Implementation (Part 2 — new this commit)
+
+This is the section that changed the most. Full architecture inventory, all read directly from `service/models/src/dl_pipeline/{models.py,lightning_modules.py}`:
+
+| Class | Type | Purpose | Trained artifact committed? | Evaluation report committed? |
 |---|---|---|---|---|
-| `train_binary_model.py` | Single XGBoost | Benign vs Attack (binary) | none | (not saved — script prints only) |
-| `train_stage1_binary.py` | Single XGBoost + 5-fold CV | Benign vs Attack (binary) | none | `stage1_binary.pkl`, `stage1_encoders.pkl` |
-| `train2_model.py` | XGBoost + RF | 3 rare classes only (Backdoor/Shellcode/Worms, Analysis merged into Backdoor) | SMOTENC + class weights | `stage2_rare_*.pkl` |
-| `train_stage2_major.py` | XGBoost + RF + LightGBM soft vote, per-class threshold tuning | 5 "major" classes (Generic, Exploits, Fuzzers, DoS, Reconnaissance) | targeted SMOTENC | `stage2_major_*.pkl` |
-| `train_combined_model.py` | XGBoost + RF + LightGBM soft vote | 6 classes (train+test CSVs concatenated) | none | `combined_*.pkl` |
-| `train_model.py` (top-level) | Single RandomForest | **All 10** original classes (rare ones kept) | SMOTETomek | (not saved) |
-| **`train_from_scratch.py`** | **XGBoost + RF + LightGBM soft vote (equal weight)** | **6 classes** (4 rare classes dropped) | none (post feature-selection) | **`final_xgb.pkl`, `final_rf.pkl`, `final_lgbm.pkl`, `feature_selector.pkl`, `final_encoders.pkl`, `final_labels.pkl`** |
-| `train_dl_model.py` | Keras dense NN (512→256→128→64→softmax) | 6 classes | SMOTE + class weights | `dl_model.h5`, `dl_scaler.pkl`, `dl_encoders.pkl`, `dl_labels.pkl` |
-| `ensemble_model.py` | *Evaluation only* — weighted ensemble of all 4 models above (LightGBM 40% / DL 30% / XGB 20% / RF 10%), with per-class thresholds that are computed but **never actually applied** (dead code — `ensemble_preds_tuned` is assigned but not used in the printed metrics) | 6 classes | — | (evaluation only) |
+| `FlowLSTM` (models.py) | BiLSTM + attention, plain PyTorch `nn.Module` | Early multiclass classifier (see "Version 1.0/1.1" in the training journey) | Ambiguous — `dl_lstm_v1.0.pt/.onnx` exist but which architecture they correspond to (this class, or `LSTMAutoencoder` below) was not disambiguated by opening `train_dl_lstm.py` in this pass | No dedicated report JSON found for `dl_lstm_v1.0` |
+| `AnomalyAutoencoder` (models.py) | Plain dense autoencoder | Early anomaly-detection baseline | No artifact found under this name | No |
+| `LSTMAutoencoder` / `MemoryLSTMAutoencoderLightning` (lightning_modules.py) | Sequence autoencoders, the latter with a discrete memory-addressing module | Anomaly/zero-day detection candidates | No matching artifact found | No |
+| **`TemporalTransformerClassifier`** (lightning_modules.py) | Transformer encoder (2 layers, 4 heads, d_model=128) + CLS-token classification head, focal loss | **Used for both the Stage-1 binary attack gate and the Stage-2 5-class attack classifier** (confirmed by both training scripts and by `experiments/lstm_training_journey.md`, "Version 1.2") | **Yes** — `dl_stage1_binary_v1.0.{pt,onnx}`, `dl_stage2_multiclass_v1.0.{pt,onnx}` | **Yes** — `dl_stage1_binary_report_v1.0.json`, `dl_stage2_multiclass_report_v1.0.json`, plus threshold/config JSONs |
+| **`TemporalOneClassVAE`** (lightning_modules.py) | Transformer-encoder one-class VAE with latent-center loss, KL warmup, and a custom multi-component calibrated anomaly score (reconstruction MSE + latent-center distance + KL surprise) | The README's "AE Anomaly Canary" for zero-day detection | **No** — no `.pt`/`.onnx` file for this class exists anywhere | **No** — and `server.js`'s attempted load of `dl_ae_threshold_v1.0.json` fails silently (caught) because the file doesn't exist |
 
-**The artifact set that the live/serving path actually uses is `final_xgb.pkl` + `final_rf.pkl` + `final_lgbm.pkl` + `feature_selector.pkl` + `final_encoders.pkl` + `final_labels.pkl`, i.e., exactly what `train_from_scratch.py` saves.** `live_predictor_worker.py` loads precisely these six files and combines the three tree models with a simple unweighted average — not the weighted DL-inclusive scheme in `ensemble_model.py`.
+**What this means concretely:**
+- The production model that the team actually finished, evaluated, and shipped as artifacts is the **`TemporalTransformerClassifier`**, used in a two-stage cascade: Stage 1 decides Normal-vs-Attack; Stage 2 (trained only on the attack subset, per the training journey's "Data subsetting: trained exclusively on attack sequences") classifies which of 5 attack families it is.
+- The **VAE anomaly canary** (the specific novelty the README highlights for zero-day detection) is fully coded — its training step, its calibrated multi-component anomaly score, its latent-center initialization routine — but there's no evidence it was ever trained to a finished, saved state. It should currently be described as **designed and implemented at the class level, not trained or evaluated.**
+- The **LSTM path (`FlowLSTM`, `LSTMAutoencoder`) is explicitly described in the team's own experiment log as superseded** by the Transformer approach ("Why We Transitioned to Temporal Transformers in Production" — three stated architectural reasons: multi-step correlation via self-attention, parallelizable training, and avoidance of vanishing/exploding gradients). The `dl_lstm_v1.0.{pt,onnx}` artifact is most plausibly a checkpoint from that superseded LSTM line, kept for the record rather than for serving.
 
-Per the mandated model table:
-
-| Model | Purpose | Training Code | Inference Code | Dataset | Metrics computed in-script? | Status |
-|---|---|---|---|---|---|---|
-| XGBoost, RF, LightGBM (soft-vote, "final") | Primary/serving model | `train_from_scratch.py` | `live_predictor_worker.py`, `predict_pipeline.py` (see §33 bug) | UNSW-NB15 (6 classes) | Yes — printed accuracy, macro recall, micro recall, classification report | **IMPLEMENTED (training + inference code); numeric results not stored in repo** |
-| XGBoost, RF (rare-class stage-2) | Experiment | `train2_model.py` | none | UNSW-NB15 (3 classes) | Yes, printed | **IMPLEMENTED (experiment only, not wired to serving)** |
-| XGBoost, RF, LightGBM (major-class stage-2 w/ threshold tuning) | Experiment | `train_stage2_major.py` | none | UNSW-NB15 (5 classes) | Yes, printed | **IMPLEMENTED (experiment only)** |
-| XGBoost, RF, LightGBM (combined train+test) | Experiment | `train_combined_model.py` | none | UNSW-NB15 (6 classes, concatenated) | Yes, printed | **IMPLEMENTED (experiment only)** |
-| RandomForest (SMOTETomek, all 10 classes) | Experiment | `train_model.py` | none | UNSW-NB15 (10 classes) | Yes, printed | **IMPLEMENTED (experiment only)** |
-| XGBoost (binary) ×2 variants | Experiment | `train_binary_model.py`, `train_stage1_binary.py` | none | UNSW-NB15 (binary) | Yes, printed | **IMPLEMENTED (experiment only)** |
-| Dense NN / Keras | Experiment, not in serving path | `train_dl_model.py` | `ensemble_model.py` (eval only) | UNSW-NB15 (6 classes) | Yes, printed | **IMPLEMENTED (experiment only; DL is not used by the live prediction bridge)** |
-
-**No saved logs, CSV result files, or JSON metric files exist anywhere in the repo (`experiments/` is empty).** Every accuracy/recall figure quoted anywhere in the documentation traces back to console `print()` output that was never captured to a file, and is reported second-hand in `docs_sahil/ml.md` and `himanshu-docs/master_synthesis_document.md`.
-
----
-
-## 16. Deep Learning Implementation
-
-A single Keras `Sequential` dense network (`train_dl_model.py`): 512→BN→Dropout(0.4) → 256→BN→Dropout(0.4) → 128→BN→Dropout(0.3) → 64→Dropout(0.2) → softmax(6 classes), Adam(lr=0.001), `EarlyStopping`+`ReduceLROnPlateau`, trained on SMOTE-balanced data with class weights, up to 150 epochs / batch 256. Saved as `dl_model.h5` (gitignored, not present in repo). **This model is not part of the live prediction path** — it only appears combined into the separate `ensemble_model.py` evaluation script, which itself is not invoked anywhere else in the codebase (no import of it from `server.js` or `live_predictor_worker.py`).
-
-The README/docs also describe an LSTM model and an Autoencoder for anomaly detection as part of the "4-model architecture." **No LSTM or Autoencoder code was found anywhere in the fetched repository.** Status: **PLANNED / DOCUMENTED ONLY.**
+**Training journey / iteration record** (`experiments/lstm_training_journey.md`), summarized and cross-checked against the stored JSON:
+- **v1.0 (BiLSTM baseline):** 82.14% accuracy, 0.7425 macro F1, but Exploits recall only 36.34% and Analysis/Backdoor recall 0.00% — diagnosed as a "double-weighting" bug from combining a `WeightedRandomSampler` *and* inverse-frequency `CrossEntropyLoss` weights simultaneously.
+- **v1.1 (BiLSTM + Attention + LayerNorm + Focal Loss, sampler removed):** 82.65% accuracy, 0.7462 macro F1; Exploits recall improved only marginally to 38.97% — diagnosed as a feature-representation limitation, not a training-recipe problem.
+- **v1.2 (`TemporalTransformerClassifier`, attack-only subset, focal loss γ=1.5):** validation macro recall 80.40%, test macro recall 79.48% — a clear, documented improvement, and **this is the version whose numbers are independently verifiable** in the committed `dl_stage2_multiclass_report_v1.0.json` (test macro recall in the stored file: 0.7948411442216059 — an exact match to the narrative document to 4 decimal places, strong internal consistency between the two).
 
 ---
 
 ## 17. Model Training
 
-- Training is run manually/locally (`python -m` style invocations mentioned in docs); there is no CI workflow found that runs training.
-- Fixed `random_state=42` is used consistently across scripts (good reproducibility practice for the code itself).
-- **No trained model artifacts are committed** — `*.pkl` and `*.h5` and the entire `service/models/artifacts/` directory are `.gitignore`d. This means: (a) the repository, as cloned fresh, cannot serve a prediction until someone re-runs one of the training scripts locally, and (b) the specific numeric results claimed in documentation cannot be reproduced or checked by a third party from the repo alone.
+- **Reproducibility has improved but is still incomplete.** The DL training scripts (`train_dl_stage1_binary.py`, `train_dl_stage2_multiclass.py`) are self-contained, deterministic (`set_seed(42)`), and — unlike the Part-1 scripts — **actually write their results to disk** (model weights, ONNX export, threshold JSON, evaluation-report JSON) rather than only printing to console. This is a genuine quality improvement.
+- However, they depend on an intermediate artifact directory, `data/sequences/*.npy` (e.g. `lstm_train_w10_v1_20260612.npy`), which is **not committed to the repository** (most likely gitignored or simply too large/never pushed). Regenerating it requires running `dl_data_pipeline_unsw.py` first — which itself expects source CSVs under `data/raw/…`, a directory that does not exist in the committed repo (§12). **So, as committed, a fresh clone cannot currently reproduce the DL training run end-to-end without first manually restructuring the `data/` directory.** The trained outputs (weights + reports) are committed and can be inspected/used as-is, which is a real improvement over Part 1 — but full pipeline reproducibility is still blocked by this path mismatch.
+- `.gitignore` now excludes only `final_rf.pkl` by name (too large for GitHub's 100 MB limit), not the whole `artifacts/` directory — a deliberate, sensible change from the first pass's blanket exclusion, and the direct reason real evaluation reports are now inspectable at all.
 
 ---
 
 ## 18. Model Evaluation
 
-Every training script computes standard sklearn metrics (`accuracy_score`, `recall_score` macro/micro, `classification_report`) and prints them — none are written to a file. The specific headline numbers repeated across the documentation layer:
+This section now needs to distinguish two tiers of evidence quality that did not both exist in the first pass:
 
-- **Accuracy: 89.75% (also written as 89.7%)**
-- **Macro recall: 81.58% (also written as 81.5%)**
-- **Micro recall: 89.75%**
-- **Per-class recall:** Normal 0.98, Generic 0.98, Reconnaissance 0.83, Fuzzers 0.80, DoS 0.66, Exploits 0.65
+**Tier A — Independently verified (new):** the Stage-1 binary and Stage-2 multiclass `TemporalTransformerClassifier` results are backed by committed JSON files generated directly by the training scripts' own evaluation code (`classification_report`, `confusion_matrix`, computed with `sklearn`, dumped with `json.dump`). Key numbers, read directly from the stored files:
 
-These originate in `docs_sahil/ml.md` (self-described as one team member's "hit & trial" experiment log — five experiments tried: plain baseline 87%/56% macro recall → SMOTE → multi-stage → rare-only model → deep learning, before landing on "drop the 4 rarest classes + soft-vote ensemble" as final). `train_from_scratch.py` is structurally the script that would produce a result of exactly this shape (6 classes, ensemble of the same 3 model types, same drop-list). **Verdict: experiment implementation found and structurally consistent with the reported numbers; the specific numeric result is not independently verified from any stored output, log file, or artifact in the repository — it rests on the team's self-reported documentation only.**
+| Model | Split | Accuracy | Notes |
+|---|---|---|---|
+| Stage-1 binary attack gate | Test | **97.55%** | Normal recall 93.43%, Attack recall 99.97%, Attack precision 96.28%, Attack F1 98.09% |
+| Stage-1 binary attack gate | Validation | 97.29% | threshold-tuned at attack-probability ≥ 0.2185 (chosen to keep Normal recall ≥ 90% while maximizing attack recall + F1) |
+| Stage-2 multiclass (5 attack families, argmax) | Test | **77.74%** | Macro recall 79.48%, macro F1 74.78%; per-class recall: DoS 88.18%, Exploits 41.25%, Fuzzers 87.90%, Generic 96.97%, Reconnaissance 83.13% |
+| Stage-2 multiclass (thresholded, conf. ≥ 0.45) | Test | 76.63% | Adds an "Attack-Unclassified" bucket for low-confidence predictions; coverage 96.7% |
+
+**Exploits remains the weak point of the whole DL line** — recall stuck around 41% across every architecture tried (BiLSTM, BiLSTM+Attention+FocalLoss, Transformer), with the training journal explicitly attributing most Exploits misclassifications to confusion with DoS, and concluding this is a feature-representation limit rather than something more training would fix.
+
+**Tier B — Still not verified (unchanged from first pass):** the Part-1 tree-ensemble headline figures (89.75% accuracy / 81.58% macro recall) remain sourced only from `docs_sahil/ml.md`'s narrative, with no stored log or report file backing them.
+
+No committed evaluation artifact exists for the VAE anomaly canary (§16) or for `FlowLSTM`/`LSTMAutoencoder` specifically — only the superseded-by-narrative numbers in the training journey document for the pre-Transformer LSTM versions (Tier A-adjacent: numbers are documented with enough detail to be plausible and internally consistent, but there is no raw JSON/log file for the LSTM versions the way there is for the final Transformer versions).
 
 ---
 
 ## 19. Post-ML/DL System Implementation
 
-Everything after "a trained model produces a label + confidence" is covered in §8–11 and §20–24: an Express bridge, MongoDB storage, and a React dashboard, with no queueing, no persistence of alerts, no auth, no explainability, no alerting channels, and no automated response. This is the entirety of "Part 2" as actually built.
+Unchanged in substance: everything after "a model produces a label" is still the same thin Express/MongoDB/React stack. What's new is that the Express layer now has richer *intent* (per-engine attribution, zero-day flagging, a `/metrics` endpoint that surfaces real evaluation data) — but that intent cannot currently be fulfilled because of the missing `unified_predictor_worker.py` (§3, §9).
 
 ---
 
 ## 20. APIs and Services
 
-Complete inventory (already given in §9): `GET /health`, `GET /alerts`, `POST /poll-once`, `GET /config`. No `/auth/*`, no `/actions/*`, no `/models/*`, no `/detect`, no `/metrics` (Prometheus format), no WebSocket endpoint — all of these are specified in detail in `documentation/07_api_and_user_manual.md` but do not exist in `server.js`.
+Now 6 endpoints instead of 4: `GET /health`, `GET /alerts`, `POST /poll-once`, `GET /config`, plus **new** `GET /stats` and `GET /metrics`. `/metrics` is worth calling out positively: it reads and returns the real committed JSON evaluation files rather than fabricating anything — a genuinely honest way to surface real results through an API. Still no auth, no WebSocket, no `/actions`, `/models`, `/detect`, or Prometheus-format `/metrics` (the new `/metrics` returns JSON, not the Prometheus text format `05_experimental_plan_and_metrics.md` specifies).
 
 ---
 
 ## 21. Real-Time / Streaming Components
 
-None. "Real-time" in the working system is a `setInterval(pollOnce, 1000)` loop over a static, already-labeled dataset — not live traffic, not a stream, no backpressure handling, no queue. The Redis-based architecture described in the docs is unimplemented.
+Unchanged: still a 1-second poll loop over a static dataset, no Redis, no queue.
 
 ---
 
 ## 22. Explainability / XAI
 
-**Not implemented.** No `shap` or `lime` package import appears in any Python file read during this audit (`requirements.txt` also does not list either package). SHAP/LIME are extensively discussed as the project's stated "primary innovation" across the README, all planning docs, the synopsis, and the uploaded IEEE reference paper — but this is exclusively a design/literature-derived proposal. The live prediction path returns only a label and a numeric confidence score (the average of the three models' max class probability); it returns no feature attributions of any kind.
+**Still not implemented.** No `shap` or `lime` import appears anywhere in the new DL code either (`dl_pipeline/`, `eval_dl_*.py`, `train_dl_*.py` — none import either package). The new `TemporalOneClassVAE`'s multi-component anomaly score (reconstruction error, latent-center distance, KL surprise, individually calibrated and weighted) is a genuinely interpretable *design* in the sense that its three components have distinct meanings — but this is not SHAP/LIME, is not surfaced anywhere to an operator, and the model itself was never finished/trained (§16). Explainability remains **PLANNED / DOCUMENTED ONLY**.
 
 ---
 
 ## 23. Alerting / Monitoring
 
-- **Alerting:** the only "alert" mechanism is (a) a `console.log` line on the server and (b) an entry appended to the in-memory `alerts` array shown on the dashboard. No SMTP/email code, no Slack webhook code, no Firebase/push code exists anywhere.
-- **Monitoring:** no Prometheus client library, no `/metrics` endpoint, no Grafana config or dashboard JSON found anywhere in the repo. `infra/` (where these would live per the docs) is empty.
+Unchanged: console logging + in-memory array only, richer now in content (engine source, anomaly score, zero-day flag are all logged to console per the updated `pollOnce()`), but still no email/Slack/push, no Prometheus/Grafana.
 
 ---
 
 ## 24. Automated Response / Prevention
 
-**0% implemented.** `service/automation/` contains a single `.gitkeep` file and nothing else — confirmed by direct directory listing. No `iptables` subprocess calls, no Suricata rule-writing code, no policy engine, no approval/rollback logic exists anywhere in the fetched repository, despite this being described as the project's "secondary innovation" throughout the documentation and the uploaded reference paper.
+**Still 0% implemented.** `service/automation/` still contains only `.gitkeep`. Unaffected by this commit.
 
 ---
 
 ## 25. Deployment
 
-**Not implemented.** `infra/` contains only `.gitkeep`. No `Dockerfile`, no `docker-compose.yml`, no Kubernetes manifest, no Nginx config was found anywhere in the repository tree, despite detailed Docker Compose YAML and Dockerfile examples appearing in `documentation/06_deployment_and_ops.md`. The only "deployment" instructions that correspond to reality are the manual `npm install` / `npm start` / `npm run dev` steps in `README.md` and `run_guide.md`.
+**Still not implemented.** `infra/` still contains only `.gitkeep`. Unaffected by this commit.
 
 ---
 
 ## 26. Testing
 
-**Not implemented.** `tests/` contains only `live_test_dataset.csv` (a data fixture used by the runtime, not a test) and `.gitkeep`. No `pytest`, `unittest`, Jest, or Playwright test file was found anywhere in the repository, despite `documentation/09_test_plan_and_checklist.md` specifying roughly 50 detailed test cases (unit, integration, dataset, model, automation, API, security, performance) and an 80% coverage target.
+**Still not implemented.** `tests/` still contains only the CSV fixture. None of the new DL code has any test coverage either — no `pytest` file validates, e.g., that `DLPreprocessor.transform()` produces the same feature count the models expect, which would have been a cheap, high-value regression test given how many moving parts (encoder, scaler, feature list, model input_size) now have to stay in lockstep.
 
 ---
 
 ## 27. Security
 
-- No authentication or authorization anywhere in the actual code (contradicts the documented JWT-based scheme). Every endpoint is open.
-- CORS is enabled with permissive defaults (`app.use(cors())`), not restricted to a specific origin.
-- Credentials handling for the actual `.env` (containing the real Mongo URI) follows good practice — it's git-ignored, and `.env.example` only contains a placeholder connection string.
-- No input validation library (no Pydantic-equivalent, no Zod/Joi) is used on the Express side; the CSV/Mongo record shape is trusted as-is.
-- The prevention/automation module that would carry the most security risk (running `iptables` commands) is entirely unimplemented, so that specific risk is currently moot — but also means the "demo-mode safety gate" described in the docs protects nothing that exists yet.
+Unchanged core findings (no auth, open CORS), plus one **new** item: `service/api/.env.example` now contains what reads as a live-looking MongoDB Atlas connection string with an embedded username and password, in place of the earlier `<username>:<password>` placeholder pattern. **This audit did not attempt to connect to it or otherwise verify whether it is a real, currently-valid credential** — but committing a filled-in connection string to a template file that's meant to be copied (`run_guide.md`: `cp .env.example .env`) is a practice worth the team double-checking and, if it is real, rotating immediately regardless.
 
 ---
 
 ## 28. Documentation vs. Actual Implementation
 
+All rows from the first-pass table still apply unless noted. New/changed rows:
+
 | Feature / Component | Documentation Claims | Repository Evidence | Status | Evidence |
 |---|---|---|---|---|
-| Backend framework | FastAPI (Python) | Express (Node.js) | **DOC/CODE MISMATCH** | `service/api/src/server.js`, `package.json` |
-| Database | PostgreSQL | MongoDB | **DOC/CODE MISMATCH** | `server.js` (MongoClient usage) |
-| Message broker | Redis | None (in-memory array) | **PLANNED / DOCUMENTED ONLY** | no redis dependency anywhere |
-| Live packet capture | tcpdump/Zeek/tshark | CSV-sampling script only | **PLANNED / DOCUMENTED ONLY** | `service/collector/` contents |
-| SHAP/LIME explainability | Core "primary innovation" | No shap/lime import found | **PLANNED / DOCUMENTED ONLY** | full read of all `.py` files |
-| SOAR-lite automated response | Core "secondary innovation," full design | `service/automation/.gitkeep` only | **PLANNED / DOCUMENTED ONLY (0%)** | directory listing |
-| WebSocket real-time alerts | Explicit spec + sample code | REST polling only | **PLANNED / DOCUMENTED ONLY** | `App.jsx`, `server.js` |
-| Authentication (JWT) | Required on all endpoints | None implemented | **PLANNED / DOCUMENTED ONLY** | `server.js` endpoint list |
-| Multi-channel alerting (email/Slack/push) | Explicit spec | None implemented | **PLANNED / DOCUMENTED ONLY** | no relevant deps/code |
-| Docker / Docker Compose deployment | Detailed YAML + Dockerfiles | `infra/.gitkeep` only | **PLANNED / DOCUMENTED ONLY** | directory listing |
-| Monitoring (Prometheus/Grafana) | Detailed config | None found | **PLANNED / DOCUMENTED ONLY** | no config files found |
-| Test suite (~50 cases, 80% coverage) | Detailed test plan doc | `tests/` has a CSV fixture only | **PLANNED / DOCUMENTED ONLY** | directory listing |
-| Multi-dataset eval (NSL-KDD, CICIDS2017) | Explicit, repeated | Only UNSW-NB15 present | **PARTIALLY IMPLEMENTED** (1 of 3 datasets) | `data/` contents |
-| LSTM / Autoencoder models | Explicit, "4-model architecture" | Not found in code | **PLANNED / DOCUMENTED ONLY** | full read of `service/models/` |
-| Ensemble classifier (XGBoost+RF+LightGBM) | Explicit spec | **Implemented and used in serving path** | **IMPLEMENTED** | `train_from_scratch.py`, `live_predictor_worker.py` |
-| Dataset sampling / class-imbalance handling | Explicit spec | **Implemented** (multiple approaches tried) | **IMPLEMENTED** | 9 training scripts |
-| React dashboard ("Sentinel") | Explicit spec, richer feature set claimed | **Implemented**, but simpler than documented (no SHAP visuals, no charts, no auth, REST polling not WS) | **PARTIALLY IMPLEMENTED** | `service/dashboard/src/` |
-| Reported accuracy/recall figures | 89.75% acc / 81.58% macro recall | Code that could produce such numbers exists; numbers themselves not stored/reproducible | **NOT VERIFIED** | see §18 |
+| "Hybrid Multi-Engine Detection" (README) | ML + DL Transformer + AE canary running together | Transformer models trained/evaluated; AE canary coded but untrained; **no script exists to combine them for serving** | **DOC/CODE MISMATCH** | `unified_predictor_worker.py` not found; `live_predictor_worker.py` unchanged |
+| DL Transformer classifier | "for sequence modeling" | **Implemented, trained, evaluated, artifacts committed** | **IMPLEMENTED** | `dl_pipeline/lightning_modules.py`, `dl_stage{1,2}_*` artifacts |
+| AE Anomaly Canary / TemporalOneClassVAE | "for zero-day detection" | Class implemented; no trained weights, threshold, or report exist | **PARTIALLY IMPLEMENTED** | class in `lightning_modules.py`; absent from `artifacts/` |
+| Multi-dataset (NSL-KDD, CICIDS2017) | Explicit, repeated | Harmonization/EDA code now exists for both, but no data files committed and a `data/raw/` path mismatch blocks even the UNSW-only script from running as-is | **PARTIALLY IMPLEMENTED (code only)** — upgraded from "documented only" | `dl_data_harmonize.py`, `dl_eda_nslkdd.py`, `dl_data_pipeline_unsw.py` |
+| Reproducible evaluation results | Implied throughout | **Now genuinely true for the two DL stage models** — first real, independently-checkable numeric evidence in this repository | **IMPLEMENTED (for these two models specifically)** | `dl_stage1_binary_report_v1.0.json`, `dl_stage2_multiclass_report_v1.0.json` |
 
 ---
 
 ## 29. Implemented Features
 
-- CSV-based dataset sampling with configurable class ratio (`mongoDB_csvCreate.py`).
-- MongoDB seeding and cursor-based sequential playback (`server.js`).
-- A working Python↔Node.js subprocess bridge over stdin/stdout JSON (`server.js`, `live_predictor_worker.py`).
-- A trained (locally, not committed) tabular ensemble classifier (XGBoost + RF + LightGBM, soft-voted) with a feature-selection step, serving predictions with a confidence score.
-- A minimal but functional live-updating React dashboard (manual + auto polling) with a distinct visual identity.
-- At least 8 additional exploratory ML training scripts covering binary classification, rare-class specialization, major-class specialization with threshold tuning, combined-dataset training, SMOTE/SMOTENC/SMOTETomek balancing, and a deep neural network.
+All items from the first pass, plus:
+- A versioned, artifact-committed DL preprocessing pipeline (feature engineering, one-hot encoding, quantile scaling, chronological split, sliding-window sequencing) with a matching live-inference preprocessor class.
+- A trained, evaluated, artifact-committed two-stage `TemporalTransformerClassifier` cascade (binary attack gate → 5-class attack classifier), including a tuned decision threshold and ONNX export for portability.
+- A genuinely reproducible evaluation trail for that model: three architecture iterations, each with stated hyperparameters and results, culminating in stored JSON reports that match the narrative document's numbers exactly.
+- Two new, functioning API endpoints (`/stats`, `/metrics`) that expose real, stored evaluation data rather than mock data.
 
 ## 30. Partially Implemented Features
 
-- **Multi-dataset evaluation:** only UNSW-NB15 is present; NSL-KDD and CICIDS2017 are cited/planned but absent.
-- **React dashboard:** functional core loop, but missing every visualization/control feature beyond a basic alert list and stat tiles.
-- **requirements.txt:** lists some but not all Python dependencies actually imported by the code (see §33).
+Updated:
+- **The DL/AE anomaly-detection line** — a sophisticated, well-designed `TemporalOneClassVAE` exists in code but has no trained artifact or evaluation evidence.
+- **Multi-dataset support** — real processing code for NSL-KDD and CICIDS2017 exists but cannot run against the committed repository (no data, path mismatch).
+- **The "unified" live serving path** — designed for in `server.js`, but the integration script that would realize it is absent.
+- (Unchanged) dashboard completeness, `requirements.txt` staleness (still doesn't list `torch`, `lightning`, `onnx`, or `tensorflow`, all of which the new/old DL scripts import).
 
 ## 31. Planned but Unimplemented Features
 
-SHAP/LIME explainability; SOAR-lite automated remediation (iptables/Suricata); live packet capture (Zeek/tcpdump/Scapy); Redis message broker; PostgreSQL persistence; FastAPI backend; JWT authentication; WebSocket streaming; multi-channel alerting (email/Slack/push); Docker/Compose/K8s deployment; Prometheus/Grafana monitoring; automated test suite; LSTM and Autoencoder models; mobile push client; CI/CD pipeline.
+Unchanged list from the first pass (SHAP/LIME, SOAR-lite, live packet capture, Redis, PostgreSQL, FastAPI, JWT auth, WebSocket streaming, multi-channel alerting, Docker/Compose/K8s, Prometheus/Grafana, automated tests, mobile client, CI/CD), **plus, newly identified as unimplemented despite being coded:** the VAE anomaly canary's trained/evaluated state, and the unified DL+ML serving integration.
 
 ## 32. Unverified Features
 
-- The exact reported accuracy (89.75%) and macro recall (81.58%) figures — code exists that could produce numbers of this shape, but the values themselves are not stored anywhere retrievable in the repository (see §18).
-- The precise UNSW-NB15 class-distribution numbers quoted in `docs_sahil/ml.md` (e.g., "Worms = 44 samples") — plausible and consistent with the code's behavior, but not independently recomputed from the raw CSV during this audit.
-- Whether a GitHub Actions CI workflow exists — none was surfaced in the retrieved file tree, but a `.github/` directory was not explicitly enumerated in the top-level listing returned by the tool, so absence is inferred rather than exhaustively confirmed.
+Unchanged for the Part-1 ML figures (89.75%/81.58%). **Newly resolved from "unverified" to "verified"**: the Stage-1 and Stage-2 DL model metrics (§18, Tier A). **Newly added as unverified:** which specific architecture (`FlowLSTM` vs. `LSTMAutoencoder`) the committed `dl_lstm_v1.0.pt/.onnx` files actually correspond to — not disambiguated in this pass without opening `train_dl_lstm.py` line-by-line.
 
 ## 33. Current Limitations
 
-**A. Confirmed limitations (directly observed in code):**
-- No live traffic anywhere — the entire "real-time" system replays a fixed 1,000-row static sample on a loop.
-- No persistence of alerts — an in-process array capped at 200, wiped on restart.
-- No authentication or access control on any endpoint.
-- `predict_pipeline.py` appears to have a **feature-shape bug**: it calls `model_xgb.predict_proba(packet_df)` directly after `encode_features()` without ever calling the saved `feature_selector.transform()` step that `train_from_scratch.py` used to reduce the training feature set — the models were trained on a post-selection feature count, so `predict_pipeline.py`'s input shape likely does not match what the models expect. (`live_predictor_worker.py`, the actually-used script, does apply the selector correctly, so the live path itself is not affected — but `predict_pipeline.py` as a standalone script looks broken.)
-- `requirements.txt` lists only `pandas, numpy, matplotlib, seaborn, scikit-learn, xgboost, imbalanced-learn, lightgbm` — it omits `tensorflow` (used by `train_dl_model.py`, `ensemble_model.py`) and `joblib` (used throughout for model I/O, though often bundled with scikit-learn). A fresh `pip install -r requirements.txt` would not be sufficient to run every script in the repo.
-- Dead/unused Vite scaffold files left in `service/dashboard/src` (`main.ts`, `counter.ts`, `style.css`) — cosmetic, not functional, but indicates the frontend was not fully cleaned up.
-- `.gitignore`d model artifacts mean the repository cannot serve a prediction out of the box; a fresh clone requires re-running training locally, and the specific reported metrics cannot be reproduced by a third party.
-
-**B. Missing components:** SHAP/LIME, SOAR-lite, live capture, Redis, PostgreSQL, FastAPI, auth, alerting channels, deployment config, monitoring, tests — see §31.
-
-**C. Partially implemented components:** dataset breadth (1 of 3 planned datasets), dashboard feature completeness — see §30.
-
-**D. Documentation/implementation mismatches:** see the full table in §28.
-
-**E. Areas requiring future experiments:** cross-dataset generalization (NSL-KDD, CICIDS2017) is entirely unattempted in code; no throughput/latency/stress testing has been run against anything (the numbers in `05_experimental_plan_and_metrics.md` are targets, not measurements); no SHAP-latency benchmark exists because SHAP isn't implemented at all.
-
-**F. Areas requiring additional implementation before publication:** at minimum, either (a) implement and measure SHAP/LIME plus save real evaluation artifacts to the repo (logs, confusion matrices, metric JSON) so numbers are independently reproducible, or (b) explicitly and consistently frame the paper(s) around the prototype that actually exists, with the microservice/XAI/SOAR design presented only as proposed future architecture (as the team's own `himanshu-docs/master_synthesis_document.md` already recommends).
-
----
+All Confirmed limitations (A) from the first pass still apply. **New, concretely observed this pass:**
+- **`unified_predictor_worker.py`, the default and only documented live-serving entry point for the new hybrid engine, does not exist anywhere in the repository.** As committed, the server cannot start its prediction bridge without manual intervention (pointing `PREDICTOR_SCRIPT` back at the old `live_predictor_worker.py`, which then silently serves none of the new DL functionality the dashboard's state layer expects).
+- **Path-convention mismatch:** the new DL data scripts (`dl_data_pipeline_unsw.py`, `dl_data_harmonize.py`, `dl_eda_nslkdd.py`) all expect source data under `data/raw/…`; the repository's actual committed data lives directly under `data/…`. Even the one dataset that *is* committed (UNSW-NB15) can't be reprocessed by the new pipeline without first restructuring the `data/` folder.
+- **Intermediate artifacts not committed:** the sequence arrays (`data/sequences/*.npy`) that the DL training scripts depend on are not in the repo, so the DL training run — unlike its *outputs* — is not currently reproducible from a fresh clone.
+- **`.env.example` contains what looks like a real, filled-in database credential** rather than a placeholder (§27).
+- **`requirements.txt` is more stale than before**: it still lists only `pandas, numpy, matplotlib, seaborn, scikit-learn, xgboost, imbalanced-learn, lightgbm` — it now additionally omits `torch`, `lightning` (PyTorch Lightning), and `onnx`, all of which are hard imports in the new, real, working DL scripts.
+- **No test coverage was added alongside a significant new subsystem** — same gap as Part 1, now larger in scope.
 
 ## 34. Existing Experiments and Results
 
+All rows from the first-pass table (§34) still apply as before (Part-1 ML, still self-reported/unverified). **New rows, Tier A verified:**
+
 | Result | Value | Experiment | Source File | Verified? |
 |---|---|---|---|---|
-| Baseline (RF/XGBoost, all classes) | Accuracy 87%, Macro recall 56% | Exp. 1 | `docs_sahil/ml.md` (narrative); structurally matches `train_model.py`/`train_binary_model.py` shape | **Not verified from stored output** |
-| SMOTE oversampling | "Recall improved slightly" (no numbers given) | Exp. 2 | `docs_sahil/ml.md` | **Not verified — no numbers to verify** |
-| Multi-stage (binary → multi-class) | Stage 1: 98% acc; Stage 2: 80% acc | Exp. 3 | `docs_sahil/ml.md`; code shape matches `train_stage1_binary.py` + `train_stage2_major.py` | **Not verified from stored output** |
-| Rare-attack-only model | Accuracy 65%, Recall 73% | Exp. 4 | `docs_sahil/ml.md`; code shape matches `train2_model.py` | **Not verified from stored output** |
-| Deep learning (dense NN) | Accuracy 86%, Recall 80% | Exp. 5 | `docs_sahil/ml.md`; code shape matches `train_dl_model.py` | **Not verified from stored output** |
-| **Final ensemble (6 classes, XGB+RF+LightGBM)** | **Accuracy 89.75%, Macro recall 81.58%, Micro recall 89.75%** | "Final" | `docs_sahil/ml.md`, repeated in `himanshu-docs/master_synthesis_document.md`; code shape matches `train_from_scratch.py` exactly (same 6-class drop-list, same 3 models) | **Experiment implementation found; result not independently verified from stored output** |
-| Per-class recall (final model) | Normal 0.98, Generic 0.98, Recon 0.83, Fuzzers 0.80, DoS 0.66, Exploits 0.65 | "Final" | `docs_sahil/ml.md` | **Not verified from stored output** |
-| Any operational metric (latency, throughput, FPR) | None reported | — | — | **No experiment found — targets only, in `05_experimental_plan_and_metrics.md`** |
-| SHAP computation latency | None reported | — | — | **Not applicable — SHAP not implemented** |
-
-No `experiments/` files, no CI logs, no notebook outputs exist to independently cross-check any of the above.
+| DL Stage-1 binary attack gate | Test accuracy 97.55%, Attack recall 99.97%, Normal recall 93.43% | `TemporalTransformerClassifier`, v1.2 line | `service/models/artifacts/dl_stage1_binary_report_v1.0.json` (code-generated) | **Verified — stored, code-generated report** |
+| DL Stage-2 multiclass (5 attack families) | Test accuracy 77.74%, macro recall 79.48%, macro F1 74.78% | `TemporalTransformerClassifier`, trained on attack-only subset | `service/models/artifacts/dl_stage2_multiclass_report_v1.0.json` (code-generated); cross-matches `experiments/lstm_training_journey.md` to 4 decimal places | **Verified — stored, code-generated report, internally cross-consistent** |
+| DL LSTM v1.0 (BiLSTM baseline) | Accuracy 82.14%, macro F1 0.7425, Exploits recall 36.34%, Analysis/Backdoor recall 0.00% | `FlowLSTM` (or `LSTMAutoencoder`) | `experiments/lstm_training_journey.md` (narrative only — no JSON report for this version) | **Documented in detail, not independently verified from a stored raw report** |
+| DL LSTM v1.1 (+Attention, +Focal Loss) | Accuracy 82.65%, macro F1 0.7462, Exploits recall 38.97% | same | `experiments/lstm_training_journey.md` | **Documented in detail, not independently verified from a stored raw report** |
+| VAE anomaly canary | None reported | `TemporalOneClassVAE` | — | **No experiment run/reported — class exists, never trained to a saved state** |
 
 ---
 
 ## 35. Missing Experiments
 
-- Any evaluation on NSL-KDD or CICIDS2017 (both datasets are entirely absent from the repo).
-- Cross-dataset generalization tests (train on X, test on Y) — specified in detail in `05_experimental_plan_and_metrics.md`, zero code found.
-- Any stress/throughput/burst/24-hour soak test — specified in the same doc, zero code found.
-- Any SHAP/LIME latency or quality measurement — not applicable since XAI isn't implemented.
-- Any ablation study (e.g., value of feature selection, value of each ensemble member, value of SMOTE variant chosen) — the many separate training scripts amount to informal ablation attempts, but none save comparable, reproducible results side by side.
-- Persisted, reproducible logging of any of the results in §34 (this is the most immediately actionable gap: simply saving `classification_report` output + a `metadata.json` per run would resolve most of the "not verified" markers above).
-
----
+Unchanged from the first pass (no NSL-KDD/CICIDS2017 evaluation, no cross-dataset generalization test, no throughput/latency/stress test, no ablation study with saved comparable outputs — though the LSTM→Transformer progression is an informal, well-documented exception to that last point). **Newly missing, specific to this commit:** any evaluation of the VAE anomaly canary at all; any end-to-end test of the "hybrid" verdict-fusion logic (`verdict_source`, `engine_agreement`) that `server.js` is now built to track, since nothing currently produces those fields.
 
 ## 36. Possible Research Contributions
 
-Being appropriately critical, per the user's explicit instruction that a feature is not automatically a contribution:
+The first pass's table (§36) still applies to the SHAP/LIME and SOAR-lite proposals (still 0% implemented — same weakness noted there). **This update meaningfully strengthens one row and adds a new one:**
 
-| Proposed contribution | Implementation evidence | Research question it could support | Experiment required | Baseline required | Metric required | Evidence currently available | Evidence still missing | Potential weakness |
-|---|---|---|---|---|---|---|---|---|
-| Soft-voting XGBoost+RF+LightGBM ensemble for UNSW-NB15 multi-class detection, with a documented "drop the 4 rarest classes" imbalance strategy | `train_from_scratch.py`, `docs_sahil/ml.md`'s 5-experiment trail | Does dropping severely under-represented classes improve macro recall more than oversampling them, for tree ensembles on UNSW-NB15? | Re-run and log all 5 documented experiments with saved metrics for a fair side-by-side comparison | Single-model baselines (already informally tried) | Accuracy, macro recall, per-class recall, confusion matrix | Code for all 5 variants exists | Saved, reproducible numeric results (currently only self-reported) | Ensemble-of-tree-models on UNSW-NB15 is a well-trodden combination in the cited literature itself (IEEE-04, Non-IEEE-08) — the *novelty* would rest specifically on the imbalance-handling comparison and honest reporting of the trade-offs, not on the ensemble choice itself |
-| A working sandbox pipeline that replays a labeled dataset through a live-style serving loop (CSV → DB → subprocess bridge → dashboard) | `server.js`, `live_predictor_worker.py`, dashboard code | Can this specific low-effort architecture (no message broker, no persistent store) meaningfully approximate "real-time" demonstration for teaching/demo purposes, and where does it break down at scale? | Load-test the current loop (it isn't tested at all today); document its actual failure modes (single fixed dataset, unbounded alert loss on restart, etc.) | None — this would be a systems/engineering evaluation, not a comparison to prior work | Throughput, memory growth, alert-loss rate | The loop exists and can be instrumented | Any load/stress measurement at all | This is a systems-engineering observation about a student prototype, not a research contribution in the ML/security sense — would need to be framed carefully, if included at all |
-| A documented planned-vs-actual architecture gap analysis (production microservice design vs. minimal sandbox) | `himanshu-docs/master_synthesis_document.md`, this audit | Not really a research question — more of a project-management/engineering-pedagogy observation | N/A | N/A | N/A | Already exists as narrative | N/A | Not a technical research contribution; useful as an honest "Implementation" section in a paper, not as a claimed novelty |
-| SHAP/LIME operationalized in a *live* dashboard (as proposed) | None — 0% implemented | Would XAI integrated into a live loop measurably reduce analyst triage time or false-alert dismissal, vs. offline XAI? | Full implementation + a user study or at minimum a latency/consistency benchmark | An offline-XAI baseline (e.g., reproducing Mohale & Obagbuwa 2025's static SHAP approach) | SHAP computation latency, feature-overlap-with-domain-knowledge, (ideally) analyst-trust proxy | None | Everything — this is 100% unimplemented | Currently just a proposal, same as the uploaded reference paper's framework — cannot be claimed as an achieved contribution |
-| SOAR-lite automated remediation with approval/rollback | None — 0% implemented (`service/automation/.gitkeep`) | Same caveat as above | Full implementation + safety/false-positive-blocking experiments | A "detection-only" baseline | Rollback correctness, false-block rate, time-to-remediate | None | Everything | Currently just a design; the uploaded IEEE paper itself already frames this exact idea as "a design recommendation... not an experimental implementation" — implementing it would be genuinely new relative to that paper, but nothing here does so yet |
+| Proposed contribution | Implementation evidence | Research question | Experiment required | Evidence available | Evidence missing | Potential weakness |
+|---|---|---|---|---|---|---|
+| **Documented architecture progression for multiclass NIDS: BiLSTM → BiLSTM+Attention+Focal-Loss → Transformer, with a diagnosed imbalance-handling failure mode ("double-weighting" bug)** | `experiments/lstm_training_journey.md` + matching stored JSON reports for the final version | Does self-attention over flow sequences resolve specific class-confusion patterns (here, Exploits↔DoS) that recurrent architectures and loss-reweighting tricks cannot? | Already substantially run — needs one more pass: log the LSTM versions' raw outputs the same way the Transformer version's were logged, for a fully apples-to-apples comparison | Strong — three real, described, numerically-consistent iterations | Raw stored reports for the two LSTM versions (currently narrative-only) | The underlying comparison (LSTM vs. Transformer on tabular/flow data) is well-trodden in the broader ML literature; the specific contribution here would be the honest failure-mode diagnosis (the double-weighting bug) and the finding that Exploits↔DoS confusion persists across architecture changes and is likely a feature-representation ceiling, not a modeling ceiling — that's a legitimate, specific, reportable finding |
+| Two-stage cascade (binary attack-gate → attack-family classifier) as an alternative to single-shot multiclass classification | `train_dl_stage1_binary.py`, `train_dl_stage2_multiclass.py`, both evaluation reports | Does gating detection into a high-recall binary stage before a specialized multiclass stage improve minority-class recall versus a single end-to-end classifier? | A direct comparison against a single-stage Transformer classifier trained on all 6 classes at once (not currently in the repo) | Both stages individually evaluated and strong (97.6% / 77.7%) | The single-stage comparison baseline | Legitimate systems-design question, modest scope, but honestly answerable with the evidence already in this repo plus one more training run |
+| SHAP/LIME operationalized in a live dashboard | Still none | (unchanged from first pass) | Full implementation | None | Everything | (unchanged) |
+| SOAR-lite automated remediation | Still none | (unchanged from first pass) | Full implementation | None | Everything | (unchanged) |
 
-**Bottom line:** the one piece of the project with actual technical substance behind it right now is the ML experimentation on UNSW-NB15 (§15/§34). Everything framed as "primary" and "secondary innovation" in the team's own documentation (XAI, SOAR-lite) is, as of this audit, unimplemented design work — which is fine as a contribution *if honestly framed as a proposed/future-work framework* (exactly as the uploaded IEEE literature-review paper already does), but cannot be presented as delivered, evaluated system functionality.
+**Updated bottom line:** Part 1's honest research core (§36 of the first pass) was "modest but real ensemble/imbalance-handling comparisons, contingent on saving real numbers." **That contingency is now partly met** — the DL side of the project has exactly the kind of saved, reproducible, iteratively-documented evidence a paper needs, for the Transformer classifier specifically. If the team does the same for the Part-1 tree-ensemble comparisons (just persist the `classification_report` output that the scripts already compute), Part 1 would have a genuinely defensible, fully-verifiable technical core.
 
 ---
 
 ## 37. Preliminary Part 1 Scope (Foundation → ML/DL)
 
-**Technical scope:** project framing, UNSW-NB15 dataset handling, preprocessing/encoding/feature-selection, the ensemble classifier (XGBoost+RF+LightGBM) and the separate deep-learning experiment, and the several imbalance-handling strategies tried.
+**Materially strengthened by this update.** In addition to everything in the first pass (§37), Part 1 can now legitimately include:
+- The DL data pipeline (feature engineering, encoding, chronological split, sequencing) as a described, artifact-backed method.
+- The two-stage `TemporalTransformerClassifier` cascade as a second, independently-verified model family alongside the tree ensemble.
+- The documented architecture-iteration story (LSTM → LSTM+Attention+Focal → Transformer) as a legitimate ablation narrative, with the caveat that only the final iteration has a stored raw report (§34).
 
-**Modules included:** `data/`, `service/collector/mongoDB_csvCreate.py`, all of `service/models/src/*.py` + `service/models/train_model.py`, `docs_sahil/`.
+**Possible figures/tables (new):** confusion matrices for Stage-1 and Stage-2 DL models (both already available as raw arrays in the stored JSON — directly plottable, no re-computation needed); a bar chart of per-class recall across all three LSTM/Transformer iterations; a comparison table of the tree ensemble vs. the DL cascade on the same 6-class task (would require running the tree ensemble on the DL pipeline's identical chronological split for a fair comparison — not currently done, since the two pipelines use different splits/feature sets).
 
-**Research question that could be studied:** how does class-imbalance handling strategy (drop-rare vs. SMOTE-variants vs. multi-stage) affect macro recall for tree-ensemble NIDS classification on UNSW-NB15, and does that generalize to a deep model?
-
-**Experiments that already exist (as code, unverified numerically):** all 5 in §34.
-**Experiments that are missing:** saved/reproducible metrics for any of them; cross-dataset generalization; any hyperparameter-search documentation (hyperparameters appear hand-set, not tuned via a logged search).
-**Dataset(s):** UNSW-NB15 only (real); NSL-KDD/CICIDS2017 are aspirational.
-**Evaluation metrics available in code:** accuracy, precision/recall/F1 (macro, micro, weighted), confusion matrix, balanced accuracy.
-**Possible figures/tables:** class-imbalance-strategy comparison table (if re-run and logged); confusion matrix for the final model; feature-importance bar chart; per-class recall bar chart.
-**Possible research contribution:** an honestly-reported, reproducible comparison of imbalance-handling strategies for ensemble NIDS on UNSW-NB15 — modest but legitimate, *contingent on actually saving and re-verifying the numbers*, since right now none of them are independently checkable.
+**Honest gap to close before writing:** the tree-ensemble numbers (Tier B, §18) and the DL numbers (Tier A, §18) are not currently comparable on equal footing — different preprocessing, different (random vs. chronological) splits, and only one side has a stored raw report. A paper claiming to compare "ML baseline vs. DL" needs both run under matching conditions with both sets of results saved.
 
 ## 38. Preliminary Part 2 Scope (Post-ML/DL System)
 
-**Technical scope:** the serving loop (Express + MongoDB + Python bridge), the React dashboard, and — separately and clearly labeled as *not implemented* — the proposed production architecture (FastAPI, Redis, PostgreSQL, SHAP/LIME, SOAR-lite, Docker, monitoring).
-
-**Modules included:** `service/api/`, `service/dashboard/`, `service/automation/` (empty), `infra/` (empty), `tests/` (empty of actual tests), the relevant planning docs.
-
-**Research question that could potentially be studied:** honestly, as it stands, there isn't yet a technical research question here that current code can answer — the only defensible framing is a systems/engineering description of the sandbox prototype plus a clearly-labeled proposed architecture (mirroring exactly what the uploaded IEEE paper already does at the conceptual level, but now grounded in a small working prototype instead of pure literature synthesis).
-
-**Experiments that already exist:** none beyond "the loop runs."
-**Experiments that are missing:** everything in §35 that relates to the system layer (throughput, latency, alert-loss, SHAP latency once implemented, SOAR safety testing once implemented).
-**Datasets:** the same 1,000-row UNSW-NB15 sample, replayed.
-**Evaluation metrics:** none currently measured (only targets exist in docs).
-**Possible figures/tables:** an architecture diagram contrasting proposed vs. actual (this audit's §5/§6/§28 material, essentially); a sequence diagram of the actual polling loop.
-**Possible research contribution:** currently thin. **Honest recommendation (see §39):** Part 2, as it stands, does not yet contain enough distinct, evaluated technical material to stand alone as a second paper's core contribution. It could support a paper if the team implements and measures at least one of {SHAP/LIME integration, SOAR-lite with safety evaluation, a real live-capture pipeline} before writing — otherwise it risks being a repackaging of the proposed-architecture material that's already covered by the uploaded reference paper.
-
----
+Largely unchanged from the first pass's conclusion — the system-integration layer (server, dashboard, alerting, SOAR, deployment) is still too thin to be a standalone paper's technical core. **One addition:** the "hybrid multi-engine verdict fusion" concept (`verdict_source`, `engine_agreement`, `zero_day_flag` fields already scaffolded in `server.js`'s state) is a legitimate systems-design idea — combining a fast supervised gate, a slower multiclass specialist, and an unsupervised anomaly canary, with disagreement tracked explicitly — but as of this audit **none of it runs**, because the file that would compute those fields doesn't exist. If the team writes `unified_predictor_worker.py` and evaluates the fusion logic (e.g., does `engine_agreement` correlate with prediction correctness? does the VAE catch anything the classifiers miss?), that would be a genuinely new, evaluable contribution for Part 2 — but it does not exist yet.
 
 ## 39. Open Questions / Missing Information
 
-1. Whether the repository's `.github/` directory contains any CI workflow — not conclusively confirmed either way from the retrieved top-level listing.
-2. Whether the trained model artifacts (`.pkl`/`.h5` files) exist somewhere outside the repo (e.g., on a team member's machine or in a cloud bucket) that could be used to independently re-verify the reported 89.75%/81.58% figures.
-3. Whether `docs_sahil/ml.md`'s dataset statistics (exact per-class counts) match the committed CSVs — not recomputed in this audit.
-4. Whether `predict_pipeline.py`'s apparent missing feature-selection step (§33) is a genuine bug or whether it's simply dead/unused code that predates `train_from_scratch.py`'s feature selector being introduced.
-5. Whether the `.github/workflows` CI claims in `documentation/03_implementation_plan.md` were ever actually created and later removed, or never created at all — the git history was not examined (only the current tree state), so this can't be distinguished.
-6. What, if anything, is in `globalPrompt.txt` (gitignored, never seen) — likely not a project deliverable, but its existence and exclusion is worth confirming with the team.
-7. Whether the "himanshusalve16" GitHub account is confirmed (vs. inferred) to belong to a co-author of the uploaded IEEE paper — see §1.
+All items from the first pass (§39) still open. **New questions from this commit:**
 
----
+1. Is `unified_predictor_worker.py` simply an uncommitted local file the team forgot to `git add`, or does it not exist yet at all? (The presence of the exact filename in both `server.js`'s default config and in `experiments/lstm_training_journey.md`'s prose — "our deployed live engine (`unified_predictor_worker.py`)" — suggests it exists locally on someone's machine and was described as already working, but simply wasn't pushed.)
+2. Is the `data/raw/` vs `data/` path mismatch (§12) intentional (e.g., the team runs these scripts against a different local data layout than what's committed) or an oversight?
+3. Which specific class (`FlowLSTM` or `LSTMAutoencoder`) do the committed `dl_lstm_v1.0.pt`/`.onnx` files correspond to, and which training script (`train_dl_lstm.py`) produced them? Not disambiguated in this pass.
+4. Was the `TemporalOneClassVAE` ever trained, even without the artifact being committed? Worth asking the team directly rather than assuming from absence-of-evidence.
+5. Is the MongoDB connection string now in `.env.example` (§27) a real, currently-valid credential? Should be checked and rotated by the team regardless, out of caution.
+6. What is `data/UNSW` (a 0-byte file, oddly named, present since the first pass) — still unexplained.
 
 ## 40. Repository Evidence Index
 
-Key files consulted during this audit, by section relevance:
+All files listed in the first pass (§40) remain valid evidence and were not re-read in this update unless explicitly cited above. **New files consulted in this update:**
 
-- `README.md`, `run_guide.md`, `requirements.txt`, `.gitignore` — top-level claims and config (§3–5)
-- `documentation/01_project_overview.md` through `10_future_work_and_risks.md` — full planned design (§5–7, §33)
-- `documentation/packet_pipeline_part1_overview.md` through `part4_dashboard_implementation.md`, `packet_pipeline_solutions.md`, `testing_using_mongodb.md` — the team's own beginner-oriented pipeline tutorials, including an explicit "not built yet" table (§11, §21)
-- `himanshu-docs/master_synthesis_document.md` — team-authored planned-vs-actual audit and literature synthesis (§2, §15–18, §34, §36)
-- `docs_sahil/method.md`, `docs_sahil/ml.md` — the ML experiment narrative and headline metrics (§15, §18, §34)
-- `others/Project_Synopsis.md` — synopsis/pitch document with architecture, budget, timeline (§1–6)
-- `others/installation_guide_and_cmds.txt`, `others/youtube_links.txt` — learning-resource notes, minimal relevance
-- `service/api/src/server.js`, `service/api/package.json`, `service/api/.env.example` — backend implementation (§9, §20, §27)
-- `service/collector/mongoDB_csvCreate.py` — data-sampling script (§11)
-- `service/models/src/*.py` (9 files), `service/models/train_model.py` — all ML/DL implementation (§13–18, §33)
-- `service/dashboard/src/App.jsx`, `src/components/*.jsx`, `src/index.css`, `src/main.jsx`, plus leftover `src/main.ts`/`counter.ts`/`style.css` — frontend implementation (§8)
-- `service/dashboard/package.json` — confirms no Chart.js/D3/axios/TypeScript app logic (§5, §8)
-- `data/UNSW_NB15_training-set.csv`, `data/UNSW_NB15_testing-set.csv` — dataset presence confirmed (not opened/parsed) (§12)
-- Directory listings confirming emptiness of `service/automation/`, `service/preproc/`, `service/mobile/`, `infra/`, `notebooks/`, `experiments/`, `tests/` (besides the CSV fixture) — (§24, §14, §25, §26)
-- `literature/literature survey/*.pdf`, `literature/research papers/*.pdf` (25 files) — presence confirmed, not opened (context only, §36)
-- `project evaluation/*.pdf` (2 files) — presence confirmed, not opened
+- `README.md`, `run_guide.md`, `service/api/.env.example` — re-read in full (§5, §9, §27)
+- `service/api/src/server.js` — re-read in full, confirmed missing predictor dependency (§3, §9, §20)
+- `experiments/lstm_training_journey.md` — read in full (§16, §18, §34, §36)
+- `service/models/artifacts/dl_stage1_binary_report_v1.0.json`, `dl_stage1_binary_threshold_v1.0.json`, `dl_stage2_multiclass_report_v1.0.json` — read in full, cross-verified against each other and against the training journey document (§18, §34)
+- `service/models/src/dl_pipeline/__init__.py`, `models.py`, `lightning_modules.py`, `dataset.py`, `evaluator.py`, `utils.py` — read in full (§16)
+- `service/models/src/dl_data_pipeline_unsw.py`, `dl_data_harmonize.py`, `dl_eda_nslkdd.py` — read in full (§12, §13, §14)
+- `service/models/src/train_dl_stage1_binary.py` — read in full (§16, §17, §18)
+- `service/preproc/dl_preprocessor.py` — read in full (§13, §14)
+- Attempted direct read of `service/models/src/unified_predictor_worker.py` — confirmed **not present** ("Path not found in repository") (§3, §9, §33)
 
-**Not opened in this audit (large binaries / out of scope for this pass):** `documentation/Flowchart.png`, `others/SNORT Tutorial.mp4`, `others/Synopsis points.png`, all 27 literature/evaluation PDFs, `service/dashboard/src/assets/*`. None of these were required to reach the conclusions above; they can be pulled in a follow-up pass if the diagrams or evaluation-committee feedback become relevant to the papers.
+**Present but not opened in this update pass** (noted for a possible follow-up): `documentation/dl_datasets_plan.md` (41 KB), `documentation/dl_models_plan.md` (28 KB), `documentation/dl_datasets_walkthrough`, `service/models/src/dl_eda_cicids.py`, `dl_eda_unsw.py`, `dl_generate_checksums.py`, `train_dl_lstm.py`, `train_dl_stage2_multiclass.py`, `eval_dl_lstm.py`, `eval_dl_stage1_binary.py`, `eval_dl_stage2_multiclass.py`, `service/models/artifacts/dl_stage2_multiclass_config_v1.0.json`, `data/artifacts/{feature_list,preprocessing_config}_unsw_v1_20260612.json`, `himanshu-docs/PROJECT_MASTER_CONTEXT.md`. None of these were required to reach the conclusions above; the `dl_datasets_plan.md`/`dl_models_plan.md` pair in particular would be worth a follow-up pass before finalizing Part 2's scope, since they may contain the team's own account of what `unified_predictor_worker.py` was meant to do.
